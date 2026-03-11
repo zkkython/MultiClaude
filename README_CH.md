@@ -277,6 +277,16 @@ pnpm run dist:mac
 
 ---
 
+## 参与贡献
+
+这个项目还在持续完善中，非常欢迎大家参与进来：
+
+- **提 Issue** — 遇到 Bug 或者有功能建议？直接开个 [Issue](https://github.com/zkkython/MultiClaude/issues) 就好
+- **提交 PR** — Fork 仓库，改完代码提个 Pull Request，我们一起让它变得更好
+- **交流想法** — 有任何想法或疑问，欢迎到 [Discussions](https://github.com/zkkython/MultiClaude/discussions) 聊聊
+
+不管是修个 typo 还是加个大功能，每一份贡献都很有价值。
+
 ## 许可证
 
 MIT

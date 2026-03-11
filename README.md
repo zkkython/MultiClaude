@@ -86,24 +86,22 @@ src/
 The core challenge: PTY terminals start a login shell (zsh) that sources `~/.zshrc`, which may overwrite the env vars we inject. MultiClaude uses a dual mechanism:
 
 1. **ZDOTDIR wrapper** (for embedded terminals) — Points zsh to a custom `.zshrc` that sources the real `~/.zshrc` first, then re-exports MultiClaude's config vars on top.
-
 2. **CLAUDE_ENV_FILE** (for Claude Code) — Creates a shell script with all config vars. Claude Code sources this file on startup, overriding anything the shell set.
-
 3. **`osascript do script`** (for system terminals) — After Terminal.app opens and completes shell init, sources the env file to override variables.
 
 ### Data Model
 
 Each config stores:
 
-| Field | Env Var | Description |
-|-------|---------|-------------|
-| `anthropicBaseUrl` | `ANTHROPIC_BASE_URL` | API endpoint URL |
-| `anthropicAuthToken` | `ANTHROPIC_AUTH_TOKEN` | Auth token |
-| `anthropicModel` | `ANTHROPIC_MODEL` | Primary model name |
-| `anthropicSmallFastModel` | `ANTHROPIC_SMALL_FAST_MODEL` | Fast model for lightweight tasks |
-| `apiTimeoutMs` | `API_TIMEOUT_MS` | Request timeout (default: 600000) |
-| `disableNonessentialTraffic` | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | Disable telemetry |
-| `customEnvVars` | *(any)* | Arbitrary key-value env vars |
+| Field                          | Env Var                                      | Description                       |
+| ------------------------------ | -------------------------------------------- | --------------------------------- |
+| `anthropicBaseUrl`           | `ANTHROPIC_BASE_URL`                       | API endpoint URL                  |
+| `anthropicAuthToken`         | `ANTHROPIC_AUTH_TOKEN`                     | Auth token                        |
+| `anthropicModel`             | `ANTHROPIC_MODEL`                          | Primary model name                |
+| `anthropicSmallFastModel`    | `ANTHROPIC_SMALL_FAST_MODEL`               | Fast model for lightweight tasks  |
+| `apiTimeoutMs`               | `API_TIMEOUT_MS`                           | Request timeout (default: 600000) |
+| `disableNonessentialTraffic` | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | Disable telemetry                 |
+| `customEnvVars`              | *(any)*                                    | Arbitrary key-value env vars      |
 
 Configs are persisted in `~/Library/Application Support/multiclaude/configs.json` with file permissions restricted to owner (0600).
 
@@ -162,6 +160,7 @@ Select a config in the sidebar (single click to select). Then:
 A new terminal tab opens with all config env vars injected. Run `claude` and it will use the configured model.
 
 Verify with:
+
 ```bash
 env | grep ANTHROPIC
 ```
@@ -190,40 +189,41 @@ Click the **System** button on a config. macOS Terminal.app opens a new window w
 
 ### Keyboard Shortcuts
 
-| Shortcut | Action |
-|----------|--------|
-| `Cmd+T` | New embedded terminal for selected config |
-| `Cmd+Shift+T` | New system terminal for selected config |
-| `Cmd+W` | Close active terminal tab |
-| `Cmd+N` | New config |
-| `Cmd+E` | Edit selected config |
-| `Cmd+D` | Duplicate selected config |
-| `Cmd+K` | Clear terminal |
-| `Cmd+B` | Toggle sidebar |
-| `Cmd+Shift+]` | Next tab |
-| `Cmd+Shift+[` | Previous tab |
-| `Cmd+1`..`Cmd+9` | Go to tab N |
-| `Cmd+=` / `Cmd+-` | Zoom in / out |
-| `Cmd+0` | Reset zoom |
+| Shortcut              | Action                                    |
+| --------------------- | ----------------------------------------- |
+| `Cmd+T`             | New embedded terminal for selected config |
+| `Cmd+Shift+T`       | New system terminal for selected config   |
+| `Cmd+W`             | Close active terminal tab                 |
+| `Cmd+N`             | New config                                |
+| `Cmd+E`             | Edit selected config                      |
+| `Cmd+D`             | Duplicate selected config                 |
+| `Cmd+K`             | Clear terminal                            |
+| `Cmd+B`             | Toggle sidebar                            |
+| `Cmd+Shift+]`       | Next tab                                  |
+| `Cmd+Shift+[`       | Previous tab                              |
+| `Cmd+1`..`Cmd+9`  | Go to tab N                               |
+| `Cmd+=` / `Cmd+-` | Zoom in / out                             |
+| `Cmd+0`             | Reset zoom                                |
 
 ### Right-Click Context Menu
 
 Right-click in a terminal for:
+
 - Copy / Paste / Select All
 - Clear Terminal
 - Open System Terminal (with same config)
 
 ## Tech Stack
 
-| Component | Technology |
-|-----------|-----------|
-| Framework | Electron 34 |
-| Language | TypeScript 5.7 |
-| Terminal | @xterm/xterm 5.5 + addons (fit, webgl, web-links) |
-| PTY | node-pty |
-| Bundler | esbuild |
-| Packaging | electron-builder |
-| UI | Vanilla TypeScript (no framework) |
+| Component | Technology                                        |
+| --------- | ------------------------------------------------- |
+| Framework | Electron 34                                       |
+| Language  | TypeScript 5.7                                    |
+| Terminal  | @xterm/xterm 5.5 + addons (fit, webgl, web-links) |
+| PTY       | node-pty                                          |
+| Bundler   | esbuild                                           |
+| Packaging | electron-builder                                  |
+| UI        | Vanilla TypeScript (no framework)                 |
 
 ## Development
 
@@ -241,6 +241,16 @@ npx electron .
 pnpm run dist:mac
 ```
 
+## Contributing
+
+Contributions are welcome! If you find a bug, have a feature request, or want to improve MultiClaude:
+
+- **Report Issues** — Open an [Issue](https://github.com/zkkython/MultiClaude/issues) to report bugs or suggest features
+- **Submit PRs** — Fork the repo, make your changes, and open a Pull Request
+- **Share Ideas** — Start a [Discussion](https://github.com/zkkython/MultiClaude/discussions) for questions or ideas
+
+All contributions, big or small, are appreciated.
+
 ## License
 
-MIT
+Apache 2.0
