@@ -149,7 +149,7 @@ html, body {
   padding: 10px 12px;
   border-radius: var(--radius);
   cursor: pointer;
-  transition: background var(--transition);
+  transition: background var(--transition), opacity var(--transition);
   margin-bottom: 2px;
 }
 
@@ -159,7 +159,20 @@ html, body {
 
 .config-item.selected {
   background: var(--bg-surface0);
-  outline: 1px solid var(--bg-surface1);
+  outline: 1px solid var(--blue);
+  box-shadow: 0 0 0 1px rgba(137, 180, 250, 0.15);
+}
+
+.config-item.selected .config-name {
+  color: var(--blue);
+}
+
+.config-list.has-selection .config-item:not(.selected) {
+  opacity: 0.45;
+}
+
+.config-list.has-selection .config-item:not(.selected):hover {
+  opacity: 0.8;
 }
 
 .config-item-header {

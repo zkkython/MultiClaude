@@ -43,7 +43,7 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
           <input type="text" placeholder="Search configs..." value="${escapeHtml(state.searchQuery)}" class="sidebar-search-input" />
         </div>
       ` : ''}
-      <div class="config-list">
+      <div class="config-list${state.selectedConfigId ? ' has-selection' : ''}">
         ${filteredConfigs.length === 0 ? `
           <div class="config-list-empty">
             ${state.searchQuery ? 'No matching configs' : 'No configs yet'}
