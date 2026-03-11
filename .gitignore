@@ -1,0 +1,11 @@
+node_modules/
+dist/
+out/
+*.dmg
+*.exe
+*.msi
+*.AppImage
+*.snap
+.DS_Store
+Thumbs.db
+*.log

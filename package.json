@@ -1,0 +1,32 @@
+{
+  "name": "multiclaude",
+  "version": "1.0.0",
+  "description": "Run multiple Claude Code configurations in parallel terminals",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "build": "node scripts/build.js",
+    "start": "electron dist/main/index.js",
+    "postinstall": "electron-rebuild",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.1",
+    "electron": "^34.0.0",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.24.2",
+    "typescript": "^5.7.3"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-web-links": "^0.11.0",
+    "@xterm/addon-webgl": "^0.18.0",
+    "@xterm/xterm": "^5.5.0",
+    "nanoid": "^5.0.9",
+    "node-pty": "^1.1.0-beta22"
+  }
+}

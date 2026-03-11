@@ -1,0 +1,47 @@
+appId: com.multiclaude.app
+productName: MultiClaude
+directories:
+  output: out
+  buildResources: assets
+files:
+  - dist/**/*
+  - node_modules/**/*
+  - package.json
+  - "!node_modules/.pnpm/**/electron/**"
+  - "!node_modules/.pnpm/**/electron-builder/**"
+  - "!node_modules/.pnpm/**/@electron/rebuild/**"
+  - "!node_modules/.pnpm/**/esbuild/**"
+  - "!node_modules/.pnpm/**/typescript/**"
+  - "!**/*.ts"
+  - "!**/*.map"
+  - "!**/src/**"
+  - "!**/scripts/**"
+asarUnpack:
+  - "node_modules/**/*.node"
+  - "node_modules/node-pty/**"
+  - "node_modules/.pnpm/**/node-pty/**"
+mac:
+  category: public.app-category.developer-tools
+  identity: null
+  target:
+    - target: dmg
+      arch:
+        - arm64
+  entitlements: null
+  entitlementsInherit: null
+dmg:
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
