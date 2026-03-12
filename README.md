@@ -113,6 +113,14 @@ Configs are persisted in `~/Library/Application Support/multiclaude/configs.json
 2. Open the DMG and drag **MultiClaude** to Applications
 3. Launch from Applications or Spotlight
 
+> **macOS Gatekeeper Notice**: This app is not code-signed with an Apple Developer certificate. On first launch, macOS may show **"MultiClaude.app is damaged and can't be opened"** or **"Apple cannot check it for malicious software"**. To fix this, run the following command in Terminal:
+>
+> ```bash
+> xattr -cr /Applications/MultiClaude.app
+> ```
+>
+> Then reopen the app. This removes the macOS quarantine flag applied to apps downloaded from the internet.
+
 ### From Source
 
 Requirements: Node.js >= 18, pnpm
