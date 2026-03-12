@@ -76,6 +76,12 @@ export function updateTabStatus(tabId: string, status: TerminalTab['status']): v
   });
 }
 
+export function renameTab(tabId: string, customName: string | undefined): void {
+  setState({
+    tabs: state.tabs.map(t => t.id === tabId ? { ...t, customName } : t),
+  });
+}
+
 export function setActiveTab(tabId: string): void {
   setState({ activeTabId: tabId });
 }

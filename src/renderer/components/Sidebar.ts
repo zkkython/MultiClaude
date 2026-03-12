@@ -15,6 +15,11 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
   const sidebar = document.createElement('div');
   sidebar.className = 'sidebar';
 
+  // Titlebar drag region (matches the top padding area for window dragging)
+  const titlebarDrag = document.createElement('div');
+  titlebarDrag.className = 'sidebar-titlebar-drag';
+  sidebar.appendChild(titlebarDrag);
+
   // Drag handle
   const dragHandle = document.createElement('div');
   dragHandle.className = 'sidebar-drag-handle';

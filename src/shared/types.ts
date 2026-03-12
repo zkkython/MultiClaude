@@ -23,6 +23,7 @@ export interface TerminalTab {
   configName: string;
   configColor: string;
   status: 'running' | 'exited';
+  customName?: string;
 }
 
 export interface TerminalSpawnResult {
