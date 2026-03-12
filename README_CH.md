@@ -14,8 +14,6 @@ Claude Code 的配置全靠环境变量（`ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH
 
 **MultiClaude 就是为了解决这件事。**
 
----
-
 ## 它能做什么？
 
 简单说：**给每个模型定义一套配置，点一下就能打开一个注入了正确环境变量的终端，多个模型可以同时跑。**
@@ -28,6 +26,11 @@ Claude Code 的配置全靠环境变量（`ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH
 - **并行使用** — 左边标签页跑 Opus，右边标签页跑 Kimi，互不干扰
 
 ---
+
+## 使用页面
+
+![1773242596469](image/README_CH/1773242596469.png)
+
 
 ## 功能一览
 
@@ -289,4 +292,4 @@ pnpm run dist:mac
 
 ## 许可证
 
-MIT
+Apache 2.0
