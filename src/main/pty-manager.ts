@@ -39,7 +39,7 @@ export function spawnPty(
   const shell = getDefaultShell();
   const home = os.homedir();
 
-  const ptyProcess: PtyProcess = pty.spawn(shell, [], {
+  const ptyProcess: PtyProcess = pty.spawn(shell, ['-l'], {
     name: 'xterm-256color',
     cols: 80,
     rows: 24,

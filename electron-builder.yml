@@ -22,13 +22,16 @@ asarUnpack:
   - "node_modules/.pnpm/**/node-pty/**"
 mac:
   category: public.app-category.developer-tools
-  identity: null
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: entitlements.plist
+  entitlementsInherit: entitlements.inherit.plist
   target:
     - target: dmg
       arch:
         - arm64
-  entitlements: null
-  entitlementsInherit: null
+        - x64
+afterSign: scripts/notarize.js
 dmg:
   contents:
     - x: 130

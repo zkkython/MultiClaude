@@ -92,13 +92,6 @@ export function showConfigEditor(
   let selectedColor = existing?.color || defaultColor;
 
   // Bind events
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) {
-      cleanup();
-      onCancel();
-    }
-  });
-
   modal.querySelector('.modal-close-btn')!.addEventListener('click', () => {
     cleanup();
     onCancel();
