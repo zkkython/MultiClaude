@@ -116,7 +116,7 @@ function handleSidebarAction(action: SidebarAction) {
       spawnTerminal(action.configId);
       break;
     case 'system-terminal':
-      window.multiclaude.systemTerminal.open(action.configId);
+      openSystemTerminal(action.configId);
       break;
     case 'edit-config': {
       const config = getState().configs.find(c => c.id === action.configId);
@@ -138,6 +138,11 @@ function handleSidebarAction(action: SidebarAction) {
 async function spawnTerminal(configId: string) {
   const config = getState().configs.find(c => c.id === configId);
   if (!config) return;
+  const launchIssue = getConfigLaunchIssue(config);
+  if (launchIssue) {
+    alert(launchIssue);
+    return;
+  }
 
   try {
     const { terminalId } = await window.multiclaude.terminal.spawn(configId);
@@ -151,6 +156,7 @@ async function spawnTerminal(configId: string) {
       configId: config.id,
       configName: config.name,
       configColor: config.color,
+      provider: config.provider,
       status: 'running',
     };
 
@@ -162,6 +168,7 @@ async function spawnTerminal(configId: string) {
     showTerminal(tabId);
   } catch (err) {
     console.error('Failed to spawn terminal:', err);
+    alert(`Failed to open terminal: ${formatError(err)}`);
   }
 }
 
@@ -200,6 +207,7 @@ function openConfigEditor(existing: ModelConfig | null) {
         await refreshConfigs();
       } catch (err) {
         console.error('Failed to save config:', err);
+        alert(`Failed to save config: ${formatError(err)}`);
       }
     },
     () => { /* cancel */ },
@@ -212,12 +220,17 @@ async function duplicateConfig(id: string) {
     await refreshConfigs();
   } catch (err) {
     console.error('Failed to duplicate config:', err);
+    alert(`Failed to duplicate config: ${formatError(err)}`);
   }
 }
 
 async function deleteConfig(id: string) {
   const config = getState().configs.find(c => c.id === id);
   if (!config) return;
+  if (hasRunningTabsForConfig(id)) {
+    alert('This config has running terminals. Please close them before deleting.');
+    return;
+  }
 
   if (!confirm(`Delete config "${config.name}"?`)) return;
 
@@ -234,6 +247,7 @@ async function deleteConfig(id: string) {
     }
   } catch (err) {
     console.error('Failed to delete config:', err);
+    alert(`Failed to delete config: ${formatError(err)}`);
   }
 }
 
@@ -259,7 +273,7 @@ async function handleMenuAction(action: string, payload?: any) {
       break;
     case 'new-system-terminal':
       if (state.selectedConfigId) {
-        window.multiclaude.systemTerminal.open(state.selectedConfigId);
+        openSystemTerminal(state.selectedConfigId);
       }
       break;
     case 'close-terminal':
@@ -287,14 +301,25 @@ async function handleMenuAction(action: string, payload?: any) {
       }
       break;
     case 'import-configs': {
-      const result = await window.multiclaude.config.import();
-      if (result && result.imported > 0) {
-        await refreshConfigs();
+      try {
+        const result = await window.multiclaude.config.import();
+        if (result && result.imported > 0) {
+          await refreshConfigs();
+        }
+        if (result && result.errors.length > 0) {
+          alert(`Import completed with warnings:\n${result.errors.join('\n')}`);
+        }
+      } catch (err) {
+        alert(`Failed to import configs: ${formatError(err)}`);
       }
       break;
     }
     case 'export-configs':
-      await window.multiclaude.config.export();
+      try {
+        await window.multiclaude.config.export();
+      } catch (err) {
+        alert(`Failed to export configs: ${formatError(err)}`);
+      }
       break;
     case 'next-tab':
       nextTab();
@@ -358,7 +383,7 @@ async function handleMenuAction(action: string, payload?: any) {
         if (tabId) {
           const tab = state.tabs.find(t => t.id === tabId);
           if (tab) {
-            window.multiclaude.systemTerminal.open(tab.configId);
+            openSystemTerminal(tab.configId);
           }
         }
       }
@@ -373,6 +398,51 @@ async function handleMenuAction(action: string, payload?: any) {
 
 function findTabByTerminalId(terminalId: string): string | undefined {
   return terminalToTab.get(terminalId);
+}
+
+async function openSystemTerminal(configId: string): Promise<void> {
+  const config = getState().configs.find(c => c.id === configId);
+  if (!config) return;
+  const launchIssue = getConfigLaunchIssue(config);
+  if (launchIssue) {
+    alert(launchIssue);
+    return;
+  }
+
+  try {
+    await window.multiclaude.systemTerminal.open(configId);
+  } catch (err) {
+    alert(`Failed to open system terminal: ${formatError(err)}`);
+  }
+}
+
+function hasRunningTabsForConfig(configId: string): boolean {
+  return getState().tabs.some(tab => tab.configId === configId && tab.status === 'running');
+}
+
+function getConfigLaunchIssue(config: ModelConfig): string | null {
+  const codexApiEnvKey = (config.codexApiKeyEnvKey || 'OPENAI_API_KEY').trim();
+  const customModel = config.provider === 'codex'
+    ? (config.customEnvVars['OPENAI_MODEL'] || '').trim()
+    : (config.customEnvVars['ANTHROPIC_MODEL'] || '').trim();
+  const customKey = config.provider === 'codex'
+    ? ((config.customEnvVars[codexApiEnvKey] || config.customEnvVars['OPENAI_API_KEY'] || '').trim())
+    : (config.customEnvVars['ANTHROPIC_AUTH_TOKEN'] || '').trim();
+
+  if (config.provider === 'codex') {
+    if (!config.openaiModel.trim() && !customModel) return `Config "${config.name}" is missing OPENAI model.`;
+    if (!config.openaiApiKey.trim() && !customKey) return `Config "${config.name}" is missing OPENAI API key.`;
+    return null;
+  }
+
+  if (!config.anthropicModel.trim() && !customModel) return `Config "${config.name}" is missing Claude model.`;
+  if (!config.anthropicAuthToken.trim() && !customKey) return `Config "${config.name}" is missing Claude auth token.`;
+  return null;
+}
+
+function formatError(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  return String(err);
 }
 
 // Subscribe to active tab changes to show correct terminal

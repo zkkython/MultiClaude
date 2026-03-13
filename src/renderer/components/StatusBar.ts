@@ -12,7 +12,8 @@ export function createStatusBar(): HTMLElement {
     let statusText = '';
     if (activeTab) {
       const statusIcon = activeTab.status === 'running' ? '●' : '○';
-      statusText = `<span class="status-indicator" style="color: ${activeTab.configColor}">${statusIcon}</span> ${activeTab.configName}`;
+      const provider = activeTab.provider === 'codex' ? 'Codex' : 'Claude';
+      statusText = `<span class="status-indicator" style="color: ${activeTab.configColor}">${statusIcon}</span> ${activeTab.configName} <span class="status-provider">(${provider})</span>`;
     }
 
     bar.innerHTML = `

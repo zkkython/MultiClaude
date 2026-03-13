@@ -1,13 +1,11 @@
-import * as os from 'os';
-import * as fs from 'fs';
-import * as path from 'path';
 import { spawn } from 'child_process';
-import { app } from 'electron';
 import type { ModelConfig } from '../shared/types.js';
 import { buildEnvForConfig } from './env-builder.js';
+import { ensureCodexApiKeyLogin } from './codex-auth.js';
 
 export async function openSystemTerminal(config: ModelConfig): Promise<void> {
   const env = buildEnvForConfig(config);
+  ensureCodexApiKeyLogin(config, env);
 
   if (process.platform === 'darwin') {
     await openMacTerminal(config, env);
@@ -23,11 +21,11 @@ async function openMacTerminal(config: ModelConfig, env: Record<string, string>)
   // sources ~/.zshrc (setting the user's default env vars). Then we use
   // osascript `do script` to source our env file in that window, overriding
   // the variables that ~/.zshrc set. Simple and reliable.
-  const envFilePath = env['CLAUDE_ENV_FILE'];
+  const envFilePath = env['MULTICLAUDE_ENV_FILE'];
   if (!envFilePath) return;
 
   // The `do script` command: source the env file, then show a brief confirmation
-  const cmd = `source ${escapeShellValue(envFilePath)} && echo "[MultiClaude] Config loaded: ${config.name.replace(/"/g, '')}"`;
+  const cmd = `source ${escapeShellValue(envFilePath)} && echo "[MultiClaude] ${config.provider} config loaded: ${config.name.replace(/"/g, '')}"`;
 
   // Escape for AppleScript double-quoted string
   const escapedCmd = cmd.replace(/\\/g, '\\\\').replace(/"/g, '\\"');

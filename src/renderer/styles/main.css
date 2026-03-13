@@ -195,6 +195,25 @@ html, body {
   margin-bottom: 4px;
 }
 
+.provider-pill {
+  margin-left: auto;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+.provider-pill.provider-claude {
+  background: rgba(137, 180, 250, 0.18);
+  border-color: rgba(137, 180, 250, 0.35);
+}
+
+.provider-pill.provider-codex {
+  background: rgba(166, 227, 161, 0.16);
+  border-color: rgba(166, 227, 161, 0.35);
+}
+
 .config-color-dot {
   width: 10px;
   height: 10px;
@@ -512,6 +531,10 @@ html, body {
   font-size: 10px;
 }
 
+.status-provider {
+  color: var(--text-muted);
+}
+
 /* ============ Buttons ============ */
 
 .btn {
@@ -645,7 +668,8 @@ html, body {
 .form-group input[type="text"],
 .form-group input[type="password"],
 .form-group input[type="number"],
-.form-group input[type="url"] {
+.form-group input[type="url"],
+.form-group select {
   width: 100%;
   padding: 8px 10px;
   background: var(--bg-surface0);
@@ -662,6 +686,10 @@ html, body {
   border-color: var(--blue);
 }
 
+.form-group select:focus {
+  border-color: var(--blue);
+}
+
 .form-group input.input-error {
   border-color: var(--red);
 }
@@ -672,6 +700,42 @@ html, body {
 
 .required {
   color: var(--red);
+}
+
+.provider-segment {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.provider-option {
+  background: var(--bg-surface0);
+  border: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+
+.provider-option + .provider-option {
+  border-left: 1px solid var(--border);
+}
+
+.provider-option.active {
+  background: var(--blue);
+  color: var(--bg-crust);
+  font-weight: 600;
+}
+
+.provider-fields.hidden {
+  display: none;
+}
+
+.form-help {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 6px;
 }
 
 .input-with-toggle {

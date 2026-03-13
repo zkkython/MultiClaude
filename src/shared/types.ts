@@ -1,13 +1,28 @@
+export type ConfigProvider = 'claude' | 'codex';
+export type CodexHomeMode = 'isolated' | 'default';
+export type CodexWireApi = 'responses' | 'chat_completions';
+
 export interface ModelConfig {
   id: string;
   name: string;
   color: string;
+  provider: ConfigProvider;
   anthropicBaseUrl: string;
   anthropicAuthToken: string;
   apiTimeoutMs: number;
   anthropicModel: string;
   anthropicSmallFastModel: string;
   disableNonessentialTraffic: boolean;
+  openaiBaseUrl: string;
+  openaiApiKey: string;
+  openaiModel: string;
+  codexHomeMode: CodexHomeMode;
+  codexHomeName: string;
+  codexModelProvider: string;
+  codexApiKeyEnvKey: string;
+  codexPersonality: string;
+  codexModelReasoningEffort: string;
+  codexWireApi: CodexWireApi;
   customEnvVars: Record<string, string>;
   createdAt: string;
   updatedAt: string;
@@ -22,6 +37,7 @@ export interface TerminalTab {
   configId: string;
   configName: string;
   configColor: string;
+  provider: ConfigProvider;
   status: 'running' | 'exited';
   customName?: string;
 }

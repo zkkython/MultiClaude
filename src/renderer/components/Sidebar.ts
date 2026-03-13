@@ -141,17 +141,20 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
 
 function renderConfigItem(config: ModelConfig, selectedId: string | null): string {
   const isSelected = config.id === selectedId;
-  const maskedToken = config.anthropicAuthToken
-    ? `****${config.anthropicAuthToken.slice(-4)}`
-    : 'Not set';
+  const providerLabel = config.provider === 'codex' ? 'Codex' : 'Claude';
+  const modelSummary = config.provider === 'codex'
+    ? (config.openaiModel || 'No model set')
+    : (config.anthropicModel || 'No model set');
+  const providerClass = config.provider === 'codex' ? 'provider-codex' : 'provider-claude';
 
   return `
     <div class="config-item ${isSelected ? 'selected' : ''}" data-config-id="${config.id}">
       <div class="config-item-header">
         <span class="config-color-dot" style="background: ${config.color}"></span>
         <span class="config-name">${escapeHtml(config.name)}</span>
+        <span class="provider-pill ${providerClass}">${providerLabel}</span>
       </div>
-      <div class="config-item-detail">${escapeHtml(config.anthropicModel || 'No model set')}</div>
+      <div class="config-item-detail">${escapeHtml(modelSummary)}</div>
       <div class="config-item-actions">
         <button class="action-btn action-btn-primary" data-action="new-terminal" data-config-id="${config.id}" title="Open embedded terminal">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M6 3.5a.5.5 0 0 1 .5.3l4 6a.5.5 0 0 1-.4.7H2a.5.5 0 0 1-.4-.8l4-6a.5.5 0 0 1 .4-.2z" transform="rotate(90 8 8)"/></svg>

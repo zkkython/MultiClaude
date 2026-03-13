@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow, dialog, Menu, Notification } from 'electron';
 import { IPC } from '../shared/constants.js';
 import * as configStore from './config-store.js';
 import { buildEnvForConfig } from './env-builder.js';
+import { ensureCodexApiKeyLogin } from './codex-auth.js';
 import { spawnPty, writePty, resizePty, killPty } from './pty-manager.js';
 import { openSystemTerminal } from './system-terminal.js';
 
@@ -85,6 +86,7 @@ export function registerIpcHandlers(): void {
 
     const terminalId = nanoid(12);
     const env = buildEnvForConfig(config);
+    ensureCodexApiKeyLogin(config, env);
     const win = BrowserWindow.getFocusedWindow();
 
     spawnPty(
