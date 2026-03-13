@@ -725,8 +725,9 @@ html, body {
   margin-bottom: 6px;
 }
 
-.env-var-row .env-key {
-  width: 140px;
+.env-var-row input.env-key {
+  width: 120px;
+  flex: 0 0 120px;
   padding: 6px 8px;
   background: var(--bg-surface0);
   border: 1px solid var(--border);
@@ -736,8 +737,10 @@ html, body {
   font-family: 'Menlo', monospace;
 }
 
-.env-var-row .env-value {
+.env-var-row input.env-value {
+  width: auto;
   flex: 1;
+  min-width: 160px;
   padding: 6px 8px;
   background: var(--bg-surface0);
   border: 1px solid var(--border);
@@ -747,8 +750,8 @@ html, body {
   font-family: 'Menlo', monospace;
 }
 
-.env-var-row .env-key:focus,
-.env-var-row .env-value:focus {
+.env-var-row input.env-key:focus,
+.env-var-row input.env-value:focus {
   border-color: var(--blue);
   outline: none;
 }
