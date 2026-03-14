@@ -1,5 +1,7 @@
 # MultiClaude
 
+
+
 Run multiple Claude Code (or any LLM CLI) configurations in parallel terminals. Define model configs with different API endpoints, tokens, and models, then launch terminals — embedded or system — with the correct environment variables automatically injected.
 
 ## Why MultiClaude?
@@ -93,8 +95,8 @@ The core challenge: PTY terminals start a login shell (zsh) that sources `~/.zsh
 
 Each config stores:
 
-| Field                          | Env Var                                      | Description                       |
-| ------------------------------ | -------------------------------------------- | --------------------------------- |
+| Field                        | Env Var                                    | Description                       |
+| ---------------------------- | ------------------------------------------ | --------------------------------- |
 | `anthropicBaseUrl`           | `ANTHROPIC_BASE_URL`                       | API endpoint URL                  |
 | `anthropicAuthToken`         | `ANTHROPIC_AUTH_TOKEN`                     | Auth token                        |
 | `anthropicModel`             | `ANTHROPIC_MODEL`                          | Primary model name                |
@@ -197,21 +199,21 @@ Click the **System** button on a config. macOS Terminal.app opens a new window w
 
 ### Keyboard Shortcuts
 
-| Shortcut              | Action                                    |
-| --------------------- | ----------------------------------------- |
-| `Cmd+T`             | New embedded terminal for selected config |
-| `Cmd+Shift+T`       | New system terminal for selected config   |
-| `Cmd+W`             | Close active terminal tab                 |
-| `Cmd+N`             | New config                                |
-| `Cmd+E`             | Edit selected config                      |
-| `Cmd+D`             | Duplicate selected config                 |
-| `Cmd+K`             | Clear terminal                            |
-| `Cmd+B`             | Toggle sidebar                            |
-| `Cmd+Shift+]`       | Next tab                                  |
-| `Cmd+Shift+[`       | Previous tab                              |
+| Shortcut          | Action                                    |
+| ----------------- | ----------------------------------------- |
+| `Cmd+T`           | New embedded terminal for selected config |
+| `Cmd+Shift+T`     | New system terminal for selected config   |
+| `Cmd+W`           | Close active terminal tab                 |
+| `Cmd+N`           | New config                                |
+| `Cmd+E`           | Edit selected config                      |
+| `Cmd+D`           | Duplicate selected config                 |
+| `Cmd+K`           | Clear terminal                            |
+| `Cmd+B`           | Toggle sidebar                            |
+| `Cmd+Shift+]`     | Next tab                                  |
+| `Cmd+Shift+[`     | Previous tab                              |
 | `Cmd+1`..`Cmd+9`  | Go to tab N                               |
 | `Cmd+=` / `Cmd+-` | Zoom in / out                             |
-| `Cmd+0`             | Reset zoom                                |
+| `Cmd+0`           | Reset zoom                                |
 
 ### Right-Click Context Menu
 
