@@ -365,17 +365,17 @@ export async function importConfigs(filePath: string): Promise<ImportResult> {
   return result;
 }
 
-export function getSettings(): { sidebarWidth: number } {
+export function getSettings(): { sidebarWidth: number; groups: any[] } {
   const settingsPath = getSettingsPath();
   try {
     if (fs.existsSync(settingsPath)) {
       const data = fs.readFileSync(settingsPath, 'utf-8');
-      return { sidebarWidth: DEFAULTS.SIDEBAR_WIDTH, ...JSON.parse(data) };
+      return { sidebarWidth: DEFAULTS.SIDEBAR_WIDTH, groups: [], ...JSON.parse(data) };
     }
   } catch (err) {
     console.error('Failed to read settings:', err);
   }
-  return { sidebarWidth: DEFAULTS.SIDEBAR_WIDTH };
+  return { sidebarWidth: DEFAULTS.SIDEBAR_WIDTH, groups: [] };
 }
 
 export function saveSettings(settings: Record<string, any>): void {

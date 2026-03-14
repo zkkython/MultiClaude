@@ -3,7 +3,7 @@ import * as path from 'path';
 import { registerIpcHandlers } from './ipc-handlers.js';
 import { createAppMenu } from './menu.js';
 import { killAllPtys } from './pty-manager.js';
-import { DEFAULTS } from '../shared/constants.js';
+import { DEFAULTS, IPC } from '../shared/constants.js';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -31,6 +31,17 @@ function createWindow(): void {
   });
 
   mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+
+  // macOS: use native swipe gesture to switch tabs.
+  // Two-finger horizontal swipe is intercepted by the OS before it becomes
+  // a wheel event, so we capture it here at the BrowserWindow level instead.
+  mainWindow.on('swipe', (_event: Electron.Event, direction: string) => {
+    if (direction === 'left') {
+      mainWindow?.webContents.send(IPC.MENU_ACTION, 'next-tab');
+    } else if (direction === 'right') {
+      mainWindow?.webContents.send(IPC.MENU_ACTION, 'prev-tab');
+    }
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;

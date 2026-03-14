@@ -57,8 +57,25 @@ export interface ImportResult {
   errors: string[];
 }
 
+export interface TabGroup {
+  id: string;
+  name: string;
+  color: string;
+  collapsed: boolean;
+  tabIds: string[];
+  associatedConfigIds: string[];
+}
+
+export interface TabGroupPersisted {
+  id: string;
+  name: string;
+  color: string;
+  associatedConfigIds: string[];
+}
+
 export interface AppSettings {
   sidebarWidth: number;
+  groups?: TabGroupPersisted[];
 }
 
 // Preload API exposed to renderer

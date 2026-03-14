@@ -38,6 +38,7 @@
 html, body {
   height: 100%;
   overflow: hidden;
+  overscroll-behavior: none;
   background: var(--bg-base);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -318,12 +319,12 @@ html, body {
 /* ============ Tab Bar ============ */
 
 .tab-bar {
+  position: relative;
   display: flex;
+  flex-direction: column;
   background: var(--bg-mantle);
   border-bottom: 1px solid var(--border);
-  overflow-x: auto;
   flex-shrink: 0;
-  -webkit-app-region: drag;
   padding-top: var(--titlebar-height);
   min-height: calc(var(--titlebar-height) + 36px);
 }
@@ -333,12 +334,184 @@ html, body {
   border-bottom: none;
 }
 
-.tab-bar::-webkit-scrollbar {
+.tab-bar-drag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--titlebar-height);
+  -webkit-app-region: drag;
+  z-index: 1;
+}
+
+.tab-bar-scroll {
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.tab-bar-scroll::-webkit-scrollbar {
   height: 2px;
 }
 
-.tab-bar::-webkit-scrollbar-thumb {
+.tab-bar-scroll::-webkit-scrollbar-thumb {
   background: var(--bg-surface1);
+}
+
+/* ============ Tab Group Header ============ */
+
+.tab-group-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  background: var(--bg-crust);
+  cursor: default;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+  user-select: none;
+}
+
+.tab-group-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--group-color, var(--text-dim));
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  flex-shrink: 0;
+  transition: color var(--transition), border-color var(--transition);
+}
+
+.tab-group-toggle:hover {
+  color: var(--group-color, var(--text));
+  border-color: var(--overlay0);
+}
+
+.tab-group-toggle:active {
+  color: var(--group-color, var(--blue));
+  border-color: rgba(137, 180, 250, 0.45);
+}
+
+.tab-group-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.tab-group-count {
+  font-size: 10px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.tab-group-name-input {
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--bg-surface0);
+  border: 1px solid var(--blue);
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+  outline: none;
+  width: 100px;
+  min-width: 0;
+}
+
+/* ============ Tab Group Separator ============ */
+
+.tab-group-separator {
+  width: 2px;
+  background: var(--bg-surface1);
+  flex-shrink: 0;
+  align-self: stretch;
+}
+
+/* ============ Tab Context Menu ============ */
+
+.tab-context-menu {
+  position: fixed;
+  z-index: 10000;
+  background: var(--bg-mantle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 0;
+  min-width: 180px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.tab-context-menu-item {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+  white-space: nowrap;
+}
+
+.tab-context-menu-item:hover {
+  background: var(--bg-surface0);
+}
+
+.tab-context-menu-item-danger:hover {
+  background: var(--red);
+  color: var(--bg-crust);
+}
+
+.tab-context-menu-item.has-submenu {
+  justify-content: space-between;
+}
+
+.tab-context-menu-arrow {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.tab-context-submenu {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: -4px;
+  background: var(--bg-mantle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 0;
+  min-width: 170px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.tab-context-menu-item.has-submenu:hover > .tab-context-submenu {
+  display: block;
+}
+
+.tab-context-menu-separator {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+.tab-context-menu-color {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .tab {
@@ -350,7 +523,12 @@ html, body {
   max-width: 200px;
   cursor: pointer;
   border-right: 1px solid var(--border);
-  transition: background var(--transition);
+  border-top: 2px solid transparent;
+  transition:
+    background var(--transition),
+    border-color var(--transition),
+    box-shadow var(--transition),
+    transform var(--transition);
   -webkit-app-region: no-drag;
   flex-shrink: 0;
 }
@@ -360,7 +538,32 @@ html, body {
 }
 
 .tab.active {
-  background: var(--bg-base);
+  background: var(--bg-surface0);
+  border-top-color: transparent;
+  border-right-color: var(--border);
+  box-shadow: none;
+}
+
+.tab.active .tab-name {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.tab.active .tab-color {
+  transform: none;
+  box-shadow: none;
+}
+
+.tab.dragging {
+  opacity: 0.6;
+}
+
+.tab.drop-before {
+  box-shadow: inset 2px 0 0 var(--blue);
+}
+
+.tab.drop-after {
+  box-shadow: inset -2px 0 0 var(--blue);
 }
 
 .tab-color {
@@ -368,10 +571,12 @@ html, body {
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
+  transition: none;
 }
 
 .tab-name {
   font-size: 12px;
+  color: var(--text-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

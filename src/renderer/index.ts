@@ -2,6 +2,7 @@ import {
   getState, setState, subscribe,
   addTab, removeTab, updateTabStatus, setActiveTab,
   nextTab, prevTab, goToTab,
+  getGroupTabIds, autoGroupByConfig,
 } from './state/store.js';
 import { createSidebar, type SidebarAction } from './components/Sidebar.js';
 import { showConfigEditor, type ConfigEditorResult } from './components/ConfigEditor.js';
@@ -14,7 +15,7 @@ import {
 } from './components/TerminalView.js';
 import { createWelcomeScreen } from './components/WelcomeScreen.js';
 import { createStatusBar } from './components/StatusBar.js';
-import type { ModelConfig, TerminalTab } from '../shared/types.js';
+import type { ModelConfig, TerminalTab, TabGroup, TabGroupPersisted } from '../shared/types.js';
 
 // Tab ID -> terminal ID mapping
 const tabToTerminal = new Map<string, string>();
@@ -24,7 +25,14 @@ let isRefreshingConfigs = false;
 async function init() {
   // Load settings
   const settings = await window.multiclaude.app.getSettings();
-  setState({ sidebarWidth: settings.sidebarWidth });
+  // Restore groups from persisted settings
+  const persistedGroups: TabGroupPersisted[] = settings.groups || [];
+  const groups: TabGroup[] = persistedGroups.map(pg => ({
+    ...pg,
+    collapsed: false,
+    tabIds: [],
+  }));
+  setState({ sidebarWidth: settings.sidebarWidth, groups });
 
   // Load configs
   const configs = await window.multiclaude.config.getAll();
@@ -41,7 +49,7 @@ async function init() {
   const mainArea = document.createElement('div');
   mainArea.className = 'main-area';
 
-  const tabBar = createTerminalTabs(handleTabSelect, handleTabClose);
+  const tabBar = createTerminalTabs(handleTabSelect, handleTabClose, handleCloseGroupTabs, handleGroupsChanged);
   const termContainer = createTerminalContainer();
   const welcomeScreen = createWelcomeScreen();
   const statusBar = createStatusBar();
@@ -260,12 +268,20 @@ async function refreshConfigs() {
   try {
     const configs = await window.multiclaude.config.getAll();
     const state = getState();
+    const configIds = new Set(configs.map(c => c.id));
+    // Clean up associatedConfigIds that no longer exist
+    const groups = state.groups.map(g => ({
+      ...g,
+      associatedConfigIds: g.associatedConfigIds.filter(cid => configIds.has(cid)),
+    }));
     setState({
       configs,
+      groups,
       selectedConfigId: state.selectedConfigId && configs.find(c => c.id === state.selectedConfigId)
         ? state.selectedConfigId
         : configs.length > 0 ? configs[0].id : null,
     });
+    saveGroupsToSettings();
   } finally {
     isRefreshingConfigs = false;
   }
@@ -402,7 +418,33 @@ async function handleMenuAction(action: string, payload?: any) {
       // Focus sidebar
       setState({ sidebarVisible: true });
       break;
+    case 'auto-group-by-config':
+      autoGroupByConfig();
+      saveGroupsToSettings();
+      break;
   }
+}
+
+function handleCloseGroupTabs(groupId: string) {
+  const tabIds = getGroupTabIds(groupId);
+  for (const tabId of tabIds) {
+    handleTabClose(tabId);
+  }
+}
+
+function handleGroupsChanged() {
+  saveGroupsToSettings();
+}
+
+function saveGroupsToSettings() {
+  const state = getState();
+  const persisted: TabGroupPersisted[] = state.groups.map(g => ({
+    id: g.id,
+    name: g.name,
+    color: g.color,
+    associatedConfigIds: g.associatedConfigIds,
+  }));
+  window.multiclaude.app.saveSettings({ groups: persisted });
 }
 
 function findTabByTerminalId(terminalId: string): string | undefined {

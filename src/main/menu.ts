@@ -127,6 +127,11 @@ export function createAppMenu(): void {
         accelerator: 'CmdOrCtrl+K',
         click: () => sendMenuAction('clear-terminal'),
       },
+      { type: 'separator' },
+      {
+        label: 'Auto Group by Config',
+        click: () => sendMenuAction('auto-group-by-config'),
+      },
     ],
   });
 
