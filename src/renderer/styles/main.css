@@ -24,6 +24,14 @@
   --radius: 6px;
   --radius-sm: 4px;
   --transition: 150ms ease;
+  --ui-font-xs: 12px;
+  --ui-font-sm: 13px;
+  --ui-gap-tight: 5px;
+  --ui-gap: 8px;
+  --ui-surface-active: rgba(205, 214, 244, 0.05);
+  --ui-text-secondary: var(--text-dim);
+  --ui-text-primary: var(--text);
+  --ui-divider-soft: rgba(108, 112, 134, 0.22);
 
   /* macOS title bar inset */
   --titlebar-height: 38px;
@@ -260,7 +268,7 @@ html, body {
   padding: 4px 8px;
   font-size: 11px;
   font-family: inherit;
-  color: var(--text-dim);
+  color: var(--ui-text-primary);
   background: var(--bg-surface0);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -272,13 +280,13 @@ html, body {
 
 .action-btn svg {
   flex-shrink: 0;
-  opacity: 0.8;
+  opacity: 0.92;
 }
 
 .action-btn:hover {
   background: var(--bg-surface1);
-  color: var(--text);
-  border-color: var(--bg-surface2);
+  color: var(--ui-text-primary);
+  border-color: var(--overlay0);
 }
 
 .action-btn:hover svg {
@@ -323,10 +331,10 @@ html, body {
   display: flex;
   flex-direction: column;
   background: var(--bg-mantle);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--ui-divider-soft);
   flex-shrink: 0;
   padding-top: var(--titlebar-height);
-  min-height: calc(var(--titlebar-height) + 36px);
+  min-height: calc(var(--titlebar-height) + 38px);
 }
 
 .tab-bar:empty {
@@ -364,9 +372,9 @@ html, body {
 .tab-group-header {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 6px 10px;
-  background: var(--bg-crust);
+  gap: var(--ui-gap);
+  padding: 7px 10px;
+  background: rgba(17, 17, 27, 0.68);
   cursor: default;
   flex-shrink: 0;
   -webkit-app-region: no-drag;
@@ -393,7 +401,7 @@ html, body {
 
 .tab-group-toggle:hover {
   color: var(--group-color, var(--text));
-  border-color: var(--overlay0);
+  border-color: var(--ui-divider-soft);
 }
 
 .tab-group-toggle:active {
@@ -402,9 +410,9 @@ html, body {
 }
 
 .tab-group-name {
-  font-size: 11px;
+  font-size: var(--ui-font-xs);
   font-weight: 600;
-  color: var(--text-dim);
+  color: var(--ui-text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -412,13 +420,13 @@ html, body {
 }
 
 .tab-group-count {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-muted);
   flex-shrink: 0;
 }
 
 .tab-group-name-input {
-  font-size: 11px;
+  font-size: var(--ui-font-xs);
   font-weight: 600;
   font-family: inherit;
   color: var(--text);
@@ -434,8 +442,9 @@ html, body {
 /* ============ Tab Group Separator ============ */
 
 .tab-group-separator {
-  width: 2px;
-  background: var(--bg-surface1);
+  width: 1px;
+  margin: 0 2px;
+  background: var(--ui-divider-soft);
   flex-shrink: 0;
   align-self: stretch;
 }
@@ -517,13 +526,13 @@ html, body {
 .tab {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
+  gap: var(--ui-gap-tight);
+  padding: 7px 11px;
   min-width: 120px;
   max-width: 200px;
   cursor: pointer;
-  border-right: 1px solid var(--border);
-  border-top: 2px solid transparent;
+  border-right: 1px solid var(--ui-divider-soft);
+  border-top: 1px solid transparent;
   transition:
     background var(--transition),
     border-color var(--transition),
@@ -534,19 +543,19 @@ html, body {
 }
 
 .tab:hover {
-  background: var(--bg-surface0);
+  background: rgba(49, 50, 68, 0.55);
 }
 
 .tab.active {
-  background: var(--bg-surface0);
+  background: var(--ui-surface-active);
   border-top-color: transparent;
-  border-right-color: var(--border);
+  border-right-color: var(--ui-divider-soft);
   box-shadow: none;
 }
 
 .tab.active .tab-name {
   font-weight: 600;
-  color: var(--text);
+  color: var(--ui-text-primary);
 }
 
 .tab.active .tab-color {
@@ -575,8 +584,8 @@ html, body {
 }
 
 .tab-name {
-  font-size: 12px;
-  color: var(--text-dim);
+  font-size: var(--ui-font-sm);
+  color: var(--ui-text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -584,7 +593,7 @@ html, body {
 }
 
 .tab-name-input {
-  font-size: 12px;
+  font-size: var(--ui-font-sm);
   font-family: inherit;
   color: var(--text);
   background: var(--bg-surface0);
@@ -702,18 +711,18 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 12px;
+  padding: 5px 12px;
   background: var(--bg-crust);
-  border-top: 1px solid var(--border);
-  font-size: 11px;
-  color: var(--text-muted);
+  border-top: 1px solid var(--ui-divider-soft);
+  font-size: var(--ui-font-xs);
+  color: var(--ui-text-secondary);
   flex-shrink: 0;
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
   z-index: 100;
-  height: 24px;
+  height: 25px;
 }
 
 .status-left {
@@ -729,7 +738,7 @@ html, body {
 }
 
 .status-sep {
-  color: var(--bg-surface1);
+  color: var(--text-muted);
 }
 
 .status-indicator {
