@@ -43,6 +43,10 @@ function isProvider(value: unknown): value is ConfigProvider {
   return value === 'claude' || value === 'codex';
 }
 
+function isValidEnvVarName(name: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
+}
+
 function normalizeConfig(raw: any, sortOrderFallback: number): ModelConfig | null {
   if (!raw || typeof raw !== 'object') return null;
 
@@ -89,7 +93,7 @@ function normalizeCustomEnv(raw: unknown): Record<string, string> {
   if (!raw || typeof raw !== 'object') return {};
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (!key) continue;
+    if (!isValidEnvVarName(key)) continue;
     if (value === undefined || value === null) {
       out[key] = '';
     } else {
@@ -327,6 +331,15 @@ export async function importConfigs(filePath: string): Promise<ImportResult> {
         result.errors.push('Skipped invalid config (missing name or provider model)');
         result.skipped++;
         continue;
+      }
+
+      const rawCustom = (item && typeof item === 'object' && (item as any).customEnvVars && typeof (item as any).customEnvVars === 'object')
+        ? (item as any).customEnvVars as Record<string, unknown>
+        : {};
+      const rawCustomCount = Object.keys(rawCustom).length;
+      const normalizedCustomCount = Object.keys(candidate.customEnvVars).length;
+      if (normalizedCustomCount < rawCustomCount) {
+        result.errors.push(`Config "${candidate.name}" contained invalid environment variable names; those entries were skipped.`);
       }
 
       let name = candidate.name;

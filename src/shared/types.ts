@@ -71,6 +71,7 @@ export interface MultiClaudeAPI {
     duplicate(id: string): Promise<ModelConfig>;
     export(): Promise<boolean>;
     import(): Promise<ImportResult | null>;
+    onChanged(callback: () => void): () => void;
   };
   terminal: {
     spawn(configId: string): Promise<TerminalSpawnResult>;

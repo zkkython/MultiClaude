@@ -1,7 +1,59 @@
-import { spawnSync } from 'child_process';
+import { spawn } from 'child_process';
 import type { ModelConfig } from '../shared/types.js';
 
-export function ensureCodexApiKeyLogin(config: ModelConfig, env: Record<string, string>): void {
+interface ExecResult {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+  notFound: boolean;
+  timedOut: boolean;
+}
+
+function runCodex(
+  args: string[],
+  env: Record<string, string>,
+  input?: string,
+  timeoutMs = 8000,
+): Promise<ExecResult> {
+  return new Promise((resolve) => {
+    let stdout = '';
+    let stderr = '';
+    let notFound = false;
+    let timedOut = false;
+
+    const child = spawn('codex', args, { env, stdio: 'pipe' });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGTERM');
+    }, timeoutMs);
+
+    child.stdout?.on('data', (chunk: Buffer | string) => {
+      stdout += chunk.toString();
+    });
+    child.stderr?.on('data', (chunk: Buffer | string) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', (err) => {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') {
+        notFound = true;
+      } else {
+        stderr += err.message;
+      }
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      resolve({ code, stdout, stderr, notFound, timedOut });
+    });
+
+    if (input !== undefined && child.stdin) {
+      child.stdin.write(input);
+      child.stdin.end();
+    }
+  });
+}
+
+export async function ensureCodexApiKeyLogin(config: ModelConfig, env: Record<string, string>): Promise<void> {
   if (config.provider !== 'codex') return;
   const providerName = (config.codexModelProvider || 'openai').trim().toLowerCase();
   if (providerName !== 'openai') return;
@@ -10,26 +62,22 @@ export function ensureCodexApiKeyLogin(config: ModelConfig, env: Record<string, 
   const apiKey = (env[keyEnv] || env['OPENAI_API_KEY'] || '').trim();
   if (!apiKey) return;
 
-  const statusResult = spawnSync('codex', ['login', 'status'], {
-    env,
-    encoding: 'utf-8',
-  });
-  if (statusResult.error && (statusResult.error as NodeJS.ErrnoException).code === 'ENOENT') {
+  const statusResult = await runCodex(['login', 'status'], env, undefined, 5000);
+  if (statusResult.notFound) {
     return;
   }
-  if (statusResult.status === 0 && statusResult.stdout.includes('Logged in')) {
+  if (!statusResult.timedOut && statusResult.code === 0 && statusResult.stdout.includes('Logged in')) {
     return;
   }
 
-  const loginResult = spawnSync('codex', ['login', '--with-api-key'], {
-    env,
-    input: `${apiKey}\n`,
-    encoding: 'utf-8',
-  });
-  if (loginResult.error && (loginResult.error as NodeJS.ErrnoException).code === 'ENOENT') {
+  const loginResult = await runCodex(['login', '--with-api-key'], env, `${apiKey}\n`, 10000);
+  if (loginResult.notFound) {
     return;
   }
-  if (loginResult.status !== 0) {
+  if (loginResult.timedOut) {
+    throw new Error('Timed out while initializing Codex API-key login');
+  }
+  if (loginResult.code !== 0) {
     const stderr = (loginResult.stderr || '').trim();
     const stdout = (loginResult.stdout || '').trim();
     throw new Error(stderr || stdout || 'Failed to initialize Codex API-key login');

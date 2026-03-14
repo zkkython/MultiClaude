@@ -11,6 +11,11 @@ const api: MultiClaudeAPI = {
     duplicate: (id) => ipcRenderer.invoke(IPC.CONFIG_DUPLICATE, id),
     export: () => ipcRenderer.invoke(IPC.CONFIG_EXPORT),
     import: () => ipcRenderer.invoke(IPC.CONFIG_IMPORT),
+    onChanged: (callback) => {
+      const handler = () => callback();
+      ipcRenderer.on(IPC.CONFIG_CHANGED, handler);
+      return () => ipcRenderer.removeListener(IPC.CONFIG_CHANGED, handler);
+    },
   },
   terminal: {
     spawn: (configId) => ipcRenderer.invoke(IPC.TERMINAL_SPAWN, configId),

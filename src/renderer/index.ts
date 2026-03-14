@@ -19,6 +19,7 @@ import type { ModelConfig, TerminalTab } from '../shared/types.js';
 // Tab ID -> terminal ID mapping
 const tabToTerminal = new Map<string, string>();
 const terminalToTab = new Map<string, string>();
+let isRefreshingConfigs = false;
 
 async function init() {
   // Load settings
@@ -95,11 +96,13 @@ async function init() {
     }
   });
 
-  // Listen for config changes from main process
+  // Listen for menu actions
   window.multiclaude.menu.onAction(handleMenuAction);
 
-  // Listen for config:changed (re-fetch configs)
-  // We'll poll on config operations since we trigger them
+  // Listen for config changes from other windows/processes
+  window.multiclaude.config.onChanged(() => {
+    void refreshConfigs();
+  });
 
   // Initial visibility
   const state = getState();
@@ -252,14 +255,20 @@ async function deleteConfig(id: string) {
 }
 
 async function refreshConfigs() {
-  const configs = await window.multiclaude.config.getAll();
-  const state = getState();
-  setState({
-    configs,
-    selectedConfigId: state.selectedConfigId && configs.find(c => c.id === state.selectedConfigId)
-      ? state.selectedConfigId
-      : configs.length > 0 ? configs[0].id : null,
-  });
+  if (isRefreshingConfigs) return;
+  isRefreshingConfigs = true;
+  try {
+    const configs = await window.multiclaude.config.getAll();
+    const state = getState();
+    setState({
+      configs,
+      selectedConfigId: state.selectedConfigId && configs.find(c => c.id === state.selectedConfigId)
+        ? state.selectedConfigId
+        : configs.length > 0 ? configs[0].id : null,
+    });
+  } finally {
+    isRefreshingConfigs = false;
+  }
 }
 
 async function handleMenuAction(action: string, payload?: any) {

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node scripts/dev.js",
     "build": "node scripts/build.js",
+    "smoke": "node scripts/smoke.js",
     "start": "electron dist/main/index.js",
     "postinstall": "electron-rebuild",
     "dist": "npm run build && electron-builder",

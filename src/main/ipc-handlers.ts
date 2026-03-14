@@ -86,7 +86,7 @@ export function registerIpcHandlers(): void {
 
     const terminalId = nanoid(12);
     const env = buildEnvForConfig(config);
-    ensureCodexApiKeyLogin(config, env);
+    await ensureCodexApiKeyLogin(config, env);
     const win = BrowserWindow.getFocusedWindow();
 
     spawnPty(

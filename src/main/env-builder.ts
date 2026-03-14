@@ -4,6 +4,10 @@ import * as path from 'path';
 import type { ModelConfig } from '../shared/types.js';
 import { getCodexHomePath, getEnvFilePath, getEnvFilesDir, getZdotdirPath } from './config-paths.js';
 
+function isValidEnvVarName(name: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
+}
+
 export function buildEnvForConfig(config: ModelConfig): Record<string, string> {
   const env: Record<string, string> = { ...process.env as Record<string, string> };
 
@@ -76,7 +80,7 @@ function mergeWithProviderPriority(
 ): Record<string, string> {
   const merged: Record<string, string> = {};
   for (const [key, value] of Object.entries(customEnvVars)) {
-    if (key && value !== undefined) {
+    if (isValidEnvVarName(key) && value !== undefined) {
       merged[key] = value;
     }
   }

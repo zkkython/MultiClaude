@@ -5,7 +5,7 @@ import { ensureCodexApiKeyLogin } from './codex-auth.js';
 
 export async function openSystemTerminal(config: ModelConfig): Promise<void> {
   const env = buildEnvForConfig(config);
-  ensureCodexApiKeyLogin(config, env);
+  await ensureCodexApiKeyLogin(config, env);
 
   if (process.platform === 'darwin') {
     await openMacTerminal(config, env);
@@ -37,43 +37,65 @@ tell application "Terminal"
 end tell
   `.trim();
 
-  spawn('osascript', ['-e', appleScript], {
-    detached: true,
-    stdio: 'ignore',
-  }).unref();
+  await spawnDetached('osascript', ['-e', appleScript], env);
 }
 
 async function openWindowsTerminal(config: ModelConfig, env: Record<string, string>): Promise<void> {
-  try {
-    spawn('wt.exe', ['new-tab', '--title', config.name], {
-      env,
-      detached: true,
-      stdio: 'ignore',
-    }).unref();
-  } catch {
-    spawn('cmd.exe', [], {
-      env,
-      detached: true,
-      stdio: 'ignore',
-    }).unref();
-  }
+  const candidates: Array<{ cmd: string; args: string[] }> = [
+    { cmd: 'wt.exe', args: ['new-tab', '--title', config.name] },
+    { cmd: 'cmd.exe', args: [] },
+    { cmd: 'powershell.exe', args: [] },
+  ];
+  await openFirstAvailable(candidates, env);
 }
 
 async function openLinuxTerminal(config: ModelConfig, env: Record<string, string>): Promise<void> {
-  const terminals = ['gnome-terminal', 'konsole', 'xfce4-terminal', 'xterm'];
-  for (const term of terminals) {
+  const terminals: Array<{ cmd: string; args: string[] }> = [
+    { cmd: 'gnome-terminal', args: [] },
+    { cmd: 'konsole', args: [] },
+    { cmd: 'xfce4-terminal', args: [] },
+    { cmd: 'xterm', args: [] },
+  ];
+  await openFirstAvailable(terminals, env);
+}
+
+async function openFirstAvailable(
+  candidates: Array<{ cmd: string; args: string[] }>,
+  env: Record<string, string>,
+): Promise<void> {
+  let lastError: Error | null = null;
+  for (const candidate of candidates) {
     try {
-      spawn(term, [], {
-        env,
-        detached: true,
-        stdio: 'ignore',
-      }).unref();
+      await spawnDetached(candidate.cmd, candidate.args, env);
       return;
-    } catch {
-      continue;
+    } catch (err) {
+      lastError = err as Error;
     }
   }
-  throw new Error('No terminal emulator found');
+  throw lastError || new Error('No terminal emulator found');
+}
+
+async function spawnDetached(command: string, args: string[], env: Record<string, string>): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, args, {
+      env,
+      detached: true,
+      stdio: 'ignore',
+    });
+
+    let settled = false;
+    child.once('error', (err) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    });
+    child.once('spawn', () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    });
+    child.unref();
+  });
 }
 
 function escapeShellValue(value: string): string {

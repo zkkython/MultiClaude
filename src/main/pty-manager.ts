@@ -1,5 +1,4 @@
 import * as os from 'os';
-import * as path from 'path';
 
 interface PtyProcess {
   onData: (callback: (data: string) => void) => void;
@@ -29,6 +28,17 @@ function getDefaultShell(): string {
   return process.env.SHELL || '/bin/zsh';
 }
 
+function getShellArgs(shell: string): string[] {
+  if (process.platform === 'win32') {
+    return [];
+  }
+  const base = shell.split('/').pop() || shell;
+  if (base === 'bash' || base === 'zsh') {
+    return ['-l'];
+  }
+  return [];
+}
+
 export function spawnPty(
   terminalId: string,
   env: Record<string, string>,
@@ -37,9 +47,10 @@ export function spawnPty(
 ): void {
   const pty = getPty();
   const shell = getDefaultShell();
+  const shellArgs = getShellArgs(shell);
   const home = os.homedir();
 
-  const ptyProcess: PtyProcess = pty.spawn(shell, ['-l'], {
+  const ptyProcess: PtyProcess = pty.spawn(shell, shellArgs, {
     name: 'xterm-256color',
     cols: 80,
     rows: 24,

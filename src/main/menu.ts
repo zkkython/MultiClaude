@@ -177,11 +177,11 @@ export function createAppMenu(): void {
     submenu: [
       {
         label: 'Documentation',
-        click: () => shell.openExternal('https://github.com/anthropics/claude-code'),
+        click: () => shell.openExternal('https://github.com/zkkython/MultiClaude'),
       },
       {
         label: 'Report Issue',
-        click: () => shell.openExternal('https://github.com/anthropics/claude-code/issues'),
+        click: () => shell.openExternal('https://github.com/zkkython/MultiClaude/issues'),
       },
     ],
   });
