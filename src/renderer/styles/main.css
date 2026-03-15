@@ -443,7 +443,7 @@ html, body {
 
 .tab-group-separator {
   width: 1px;
-  margin: 0 2px;
+  margin: 0;
   background: var(--ui-divider-soft);
   flex-shrink: 0;
   align-self: stretch;
