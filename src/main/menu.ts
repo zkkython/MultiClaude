@@ -115,6 +115,11 @@ export function createAppMenu(): void {
         accelerator: 'CmdOrCtrl+Shift+[',
         click: () => sendMenuAction('prev-tab'),
       },
+      {
+        label: 'Next Waiting Terminal',
+        accelerator: 'CmdOrCtrl+;',
+        click: () => sendMenuAction('next-waiting'),
+      },
       { type: 'separator' },
       ...Array.from({ length: 9 }, (_, i) => ({
         label: `Go to Tab ${i + 1}`,

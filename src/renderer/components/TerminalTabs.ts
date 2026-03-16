@@ -1,7 +1,7 @@
 import {
   getState, setActiveTab, removeTab, renameTab, subscribe,
   createGroup, deleteGroup, renameGroup, toggleGroupCollapse,
-  moveTabToGroup, removeTabFromGroup, getGroupForTab, moveTabRelative,
+  moveTabToGroup, removeTabFromGroup, getGroupForTab, moveTabRelative, getTabEffectiveState,
 } from '../state/store.js';
 import type { TerminalTab, TabGroup } from '../../shared/types.js';
 
@@ -201,11 +201,16 @@ export function createTerminalTabs(
     let html = '';
     for (let gi = 0; gi < groups.length; gi++) {
       const group = groups[gi];
+      const waitingCount = group.tabIds.reduce((acc, tid) => {
+        const tab = tabs.find(t => t.id === tid);
+        if (!tab) return acc;
+        return getTabEffectiveState(tab) === 'waiting' ? acc + 1 : acc;
+      }, 0);
       // Group separator before every group except the first
       if (gi > 0 || false) {
         html += '<div class="tab-group-separator"></div>';
       }
-      html += renderGroupHeader(group);
+      html += renderGroupHeader(group, waitingCount);
       if (!group.collapsed) {
         for (const tid of group.tabIds) {
           const tab = tabs.find(t => t.id === tid);
@@ -590,25 +595,32 @@ export function createTerminalTabs(
   return tabBar;
 }
 
-function renderGroupHeader(group: TabGroup): string {
+function renderGroupHeader(group: TabGroup, waitingCount: number): string {
   const toggle = group.collapsed ? '\u25B8' : '\u25BE';
+  const waitingBadge = waitingCount > 0 ? `<span class="tab-group-waiting">W${waitingCount}</span>` : '';
   return `
-    <div class="tab-group-header" data-group-id="${group.id}" style="--group-color: ${group.color}">
+    <div class="tab-group-header ${waitingCount > 0 ? 'tab-group-header-waiting' : ''}" data-group-id="${group.id}" style="--group-color: ${group.color}">
       <span class="tab-group-toggle">${toggle}</span>
       <span class="tab-group-name">${escapeHtml(group.name)}</span>
       <span class="tab-group-count">(${group.tabIds.length})</span>
+      ${waitingBadge}
     </div>
   `;
 }
 
 function renderTab(tab: TerminalTab, isActive: boolean): string {
-  const statusClass = tab.status === 'exited' ? 'tab-exited' : '';
+  const effectiveState = getTabEffectiveState(tab);
+  const statusClass = effectiveState === 'exited' ? 'tab-exited' : '';
+  const waitingClass = effectiveState === 'waiting' ? 'tab-waiting' : '';
   const displayName = tab.customName || tab.configName;
+  const waitingBadge = effectiveState === 'waiting' ? '<span class="tab-waiting-badge">● waiting</span>' : '';
+  const exitedBadge = tab.status === 'exited' ? '<span class="tab-status-badge">exited</span>' : '';
   return `
-    <div class="tab ${isActive ? 'active' : ''} ${statusClass}" data-tab-id="${tab.id}" draggable="true">
+    <div class="tab ${isActive ? 'active' : ''} ${statusClass} ${waitingClass}" data-tab-id="${tab.id}" data-runtime-state="${effectiveState}" draggable="true">
       <span class="tab-color" style="background: ${tab.configColor}"></span>
       <span class="tab-name">${escapeHtml(displayName)}</span>
-      ${tab.status === 'exited' ? '<span class="tab-status-badge">exited</span>' : ''}
+      ${waitingBadge}
+      ${exitedBadge}
       <button class="tab-close" title="Close">\u2715</button>
     </div>
   `;

@@ -1,0 +1,95 @@
+{
+  "cases": [
+    {
+      "provider": "claude",
+      "events": [
+        { "type": "message_start", "_mc_expected_input": false, "_mc_provider_state": "streaming" },
+        {
+          "type": "content_block_delta",
+          "delta": { "type": "text_delta", "text": "Planning..." },
+          "_mc_expected_input": false,
+          "_mc_provider_state": "streaming"
+        },
+        {
+          "type": "content_block_start",
+          "content_block": { "type": "tool_use", "id": "c-tool-1", "name": "apply_patch" },
+          "_mc_expected_input": true,
+          "_mc_provider_state": "awaiting_input"
+        },
+        { "type": "message_stop", "stop_reason": "end_turn", "_mc_expected_input": false, "_mc_provider_state": "completed" }
+      ]
+    },
+    {
+      "provider": "codex",
+      "events": [
+        { "type": "response.created", "_mc_expected_input": false, "_mc_provider_state": "streaming" },
+        {
+          "type": "response.output_text.delta",
+          "delta": "Analyzing repository",
+          "_mc_expected_input": false,
+          "_mc_provider_state": "streaming"
+        },
+        {
+          "type": "run.requires_action",
+          "required_action": {
+            "submit_tool_outputs": {
+              "tool_calls": [{ "id": "cdx-tool-1", "function": { "name": "list_files" } }]
+            }
+          },
+          "_mc_expected_input": true,
+          "_mc_provider_state": "awaiting_input"
+        },
+        { "type": "run.completed", "_mc_expected_input": false, "_mc_provider_state": "completed" }
+      ]
+    },
+    {
+      "provider": "claude",
+      "events": [
+        { "type": "message_start", "_mc_expected_input": false, "_mc_provider_state": "streaming" },
+        {
+          "type": "content_block_start",
+          "content_block": { "type": "tool_use", "id": "c-tool-2", "name": "read_file" },
+          "_mc_expected_input": true,
+          "_mc_provider_state": "awaiting_input"
+        },
+        {
+          "type": "error",
+          "error": { "message": "temporary transport issue" },
+          "_mc_expected_input": false,
+          "_mc_provider_state": "fallback_pty"
+        }
+      ]
+    },
+    {
+      "provider": "codex",
+      "events": [
+        { "type": "run.created", "_mc_expected_input": false, "_mc_provider_state": "streaming" },
+        {
+          "type": "response.output_item.added",
+          "item": { "id": "cdx-tool-2", "name": "run_command" },
+          "_mc_expected_input": true,
+          "_mc_provider_state": "awaiting_input"
+        },
+        {
+          "type": "run.failed",
+          "error": { "message": "provider exited non-zero" },
+          "_mc_expected_input": false,
+          "_mc_provider_state": "fallback_pty"
+        }
+      ]
+    },
+    {
+      "provider": "claude",
+      "events": [
+        { "type": "message_start", "_mc_expected_input": false, "_mc_provider_state": "streaming" },
+        {
+          "type": "content_block_delta",
+          "delta": { "type": "text_delta", "text": "No interaction needed" },
+          "_mc_expected_input": false,
+          "_mc_provider_state": "streaming"
+        },
+        { "type": "message_stop", "stop_reason": "end_turn", "_mc_expected_input": false, "_mc_provider_state": "completed" }
+      ]
+    }
+  ]
+}

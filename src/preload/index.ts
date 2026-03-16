@@ -32,6 +32,12 @@ const api: MultiClaudeAPI = {
       ipcRenderer.on(IPC.TERMINAL_EXIT, handler);
       return () => ipcRenderer.removeListener(IPC.TERMINAL_EXIT, handler);
     },
+    onState: (callback) => {
+      const handler = (_event: any, terminalId: string, state: any) => callback(terminalId, state);
+      ipcRenderer.on(IPC.TERMINAL_STATE, handler);
+      return () => ipcRenderer.removeListener(IPC.TERMINAL_STATE, handler);
+    },
+    getStateSnapshot: () => ipcRenderer.invoke(IPC.TERMINAL_STATE_SNAPSHOT_GET),
   },
   systemTerminal: {
     open: (configId) => ipcRenderer.invoke(IPC.SYSTEM_TERMINAL_OPEN, configId),
@@ -54,6 +60,23 @@ const api: MultiClaudeAPI = {
     },
     getSettings: () => ipcRenderer.invoke(IPC.APP_GET_SETTINGS),
     saveSettings: (settings) => ipcRenderer.invoke(IPC.APP_SAVE_SETTINGS, settings),
+  },
+  protocol: {
+    startSession: (configId, terminalId) => ipcRenderer.invoke(IPC.RUNNER_SESSION_START, configId, terminalId),
+    ingestRawEvent: (sessionId, rawEvent) => ipcRenderer.invoke(IPC.RUNNER_EVENT_INGEST, sessionId, rawEvent),
+    resolveInput: (sessionId, requestId) => ipcRenderer.invoke(IPC.RUNNER_INPUT_RESOLVE, sessionId, requestId),
+    submitInput: (input) => ipcRenderer.invoke(IPC.RUNNER_INPUT_SUBMIT, input),
+    interruptSession: (sessionId) => ipcRenderer.invoke(IPC.RUNNER_SESSION_INTERRUPT, sessionId),
+    stopSession: (sessionId) => ipcRenderer.invoke(IPC.RUNNER_SESSION_STOP, sessionId),
+    endSession: (sessionId) => ipcRenderer.invoke(IPC.RUNNER_SESSION_END, sessionId),
+    onEvent: (callback) => {
+      const handler = (_event: any, runnerEvent: any) => callback(runnerEvent);
+      ipcRenderer.on(IPC.RUNNER_EVENT, handler);
+      return () => ipcRenderer.removeListener(IPC.RUNNER_EVENT, handler);
+    },
+    getMetrics: () => ipcRenderer.invoke(IPC.RUNNER_METRICS_GET),
+    resetMetrics: () => ipcRenderer.invoke(IPC.RUNNER_METRICS_RESET),
+    testConnectivity: (input) => ipcRenderer.invoke(IPC.RUNNER_CONNECTIVITY_TEST, input),
   },
 };
 

@@ -419,10 +419,25 @@ html, body {
   max-width: 120px;
 }
 
+.tab-group-header-waiting .tab-group-name {
+  color: var(--text);
+}
+
 .tab-group-count {
   font-size: 11px;
   color: var(--text-muted);
   flex-shrink: 0;
+}
+
+.tab-group-waiting {
+  font-size: 10px;
+  font-weight: 700;
+  color: #f6c177;
+  background: rgba(246, 193, 119, 0.14);
+  border: 1px solid rgba(246, 193, 119, 0.35);
+  border-radius: 10px;
+  padding: 1px 6px;
+  margin-left: 2px;
 }
 
 .tab-group-name-input {
@@ -553,6 +568,15 @@ html, body {
   box-shadow: none;
 }
 
+.tab-waiting {
+  background: rgba(246, 193, 119, 0.08);
+}
+
+.tab-waiting .tab-name {
+  color: #f6d7a8;
+  font-weight: 600;
+}
+
 .tab.active .tab-name {
   font-weight: 600;
   color: var(--ui-text-primary);
@@ -614,6 +638,16 @@ html, body {
   border-radius: 3px;
 }
 
+.tab-waiting-badge {
+  font-size: 10px;
+  color: #f6c177;
+  background: rgba(246, 193, 119, 0.14);
+  border: 1px solid rgba(246, 193, 119, 0.28);
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
 .tab-exited .tab-name {
   color: var(--text-muted);
 }
@@ -656,6 +690,50 @@ html, body {
 
 .terminal-view .xterm-viewport {
   overflow-y: auto !important;
+}
+
+.protocol-input-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--ui-divider-soft);
+  background: var(--bg-mantle);
+  margin-bottom: 25px;
+}
+
+.protocol-input-prompt {
+  font-size: 12px;
+  color: var(--text);
+}
+
+.protocol-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.protocol-input-field {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-surface0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 7px 10px;
+  outline: none;
+}
+
+.protocol-input-field:focus {
+  border-color: var(--blue);
+}
+
+.protocol-input-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ============ Welcome Screen ============ */
@@ -737,8 +815,18 @@ html, body {
   gap: 6px;
 }
 
+.status-metric {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
 .status-sep {
   color: var(--text-muted);
+}
+
+.status-state {
+  color: var(--text);
+  text-transform: lowercase;
 }
 
 .status-indicator {
@@ -747,6 +835,22 @@ html, body {
 
 .status-provider {
   color: var(--text-muted);
+}
+
+.status-waiting {
+  cursor: default;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.status-waiting.active {
+  cursor: pointer;
+  color: #f6d7a8;
+  background: rgba(246, 193, 119, 0.16);
+}
+
+.status-waiting.active:hover {
+  background: rgba(246, 193, 119, 0.24);
 }
 
 /* ============ Buttons ============ */
@@ -883,6 +987,7 @@ html, body {
 .form-group input[type="password"],
 .form-group input[type="number"],
 .form-group input[type="url"],
+.form-group textarea,
 .form-group select {
   width: 100%;
   padding: 8px 10px;
@@ -901,6 +1006,10 @@ html, body {
 }
 
 .form-group select:focus {
+  border-color: var(--blue);
+}
+
+.form-group textarea:focus {
   border-color: var(--blue);
 }
 
@@ -1037,6 +1146,45 @@ html, body {
 .env-eq {
   color: var(--text-muted);
   font-family: monospace;
+}
+
+.protocol-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+  margin-top: 8px;
+}
+
+.protocol-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.protocol-test-output {
+  margin-top: 8px;
+  max-height: 140px;
+  overflow: auto;
+  background: var(--bg-surface0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 8px;
+  white-space: pre-wrap;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.text-success {
+  color: var(--green) !important;
+}
+
+.text-danger {
+  color: var(--red) !important;
 }
 
 /* ============ Scrollbar ============ */

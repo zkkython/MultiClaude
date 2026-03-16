@@ -1,4 +1,11 @@
-import type { ModelConfig, TerminalTab, TabGroup } from '../../shared/types.js';
+import type {
+  ModelConfig,
+  RunnerMetricsSnapshot,
+  RuntimeState,
+  TerminalRuntimeState,
+  TerminalTab,
+  TabGroup,
+} from '../../shared/types.js';
 
 type Listener = () => void;
 
@@ -12,6 +19,8 @@ export interface AppState {
   searchQuery: string;
   fontSize: number;
   groups: TabGroup[];
+  runtimeStatesByTabId: Record<string, TerminalRuntimeState>;
+  protocolMetrics: RunnerMetricsSnapshot | null;
 }
 
 const initialState: AppState = {
@@ -24,6 +33,8 @@ const initialState: AppState = {
   searchQuery: '',
   fontSize: 14,
   groups: [],
+  runtimeStatesByTabId: {},
+  protocolMetrics: null,
 };
 
 let state: AppState = { ...initialState };
@@ -86,13 +97,56 @@ export function removeTab(tabId: string): void {
       }
     }
   }
-  setState({ tabs, groups, activeTabId });
+  const runtimeStatesByTabId = { ...state.runtimeStatesByTabId };
+  delete runtimeStatesByTabId[tabId];
+  setState({ tabs, groups, activeTabId, runtimeStatesByTabId });
 }
 
 export function updateTabStatus(tabId: string, status: TerminalTab['status']): void {
   setState({
     tabs: state.tabs.map(t => t.id === tabId ? { ...t, status } : t),
   });
+}
+
+export function setTabRuntimeState(tabId: string, runtimeState: TerminalRuntimeState): void {
+  setState({
+    runtimeStatesByTabId: {
+      ...state.runtimeStatesByTabId,
+      [tabId]: runtimeState,
+    },
+  });
+}
+
+export function setProtocolMetrics(metrics: RunnerMetricsSnapshot | null): void {
+  setState({ protocolMetrics: metrics });
+}
+
+export function removeTabRuntimeState(tabId: string): void {
+  if (!state.runtimeStatesByTabId[tabId]) return;
+  const runtimeStatesByTabId = { ...state.runtimeStatesByTabId };
+  delete runtimeStatesByTabId[tabId];
+  setState({ runtimeStatesByTabId });
+}
+
+export function getTabRuntimeState(tabId: string): TerminalRuntimeState | undefined {
+  return state.runtimeStatesByTabId[tabId];
+}
+
+export function getTabEffectiveState(tab: TerminalTab): RuntimeState {
+  return state.runtimeStatesByTabId[tab.id]?.state || tab.status;
+}
+
+export function getRuntimeStateCounts(): Record<RuntimeState, number> {
+  const counts: Record<RuntimeState, number> = {
+    waiting: 0,
+    running: 0,
+    idle: 0,
+    exited: 0,
+  };
+  for (const tab of state.tabs) {
+    counts[getTabEffectiveState(tab)] += 1;
+  }
+  return counts;
 }
 
 export function renameTab(tabId: string, customName: string | undefined): void {
@@ -127,6 +181,25 @@ function getVisibleTabsFromState(s: AppState): TerminalTab[] {
 
 export function getVisibleTabs(): TerminalTab[] {
   return getVisibleTabsFromState(state);
+}
+
+export function findNextWaitingTabId(fromTabId?: string | null): string | null {
+  const visible = getVisibleTabs();
+  if (visible.length === 0) return null;
+  const waitingTabs = visible.filter(tab => getTabEffectiveState(tab) === 'waiting');
+  if (waitingTabs.length === 0) return null;
+
+  if (!fromTabId) return waitingTabs[0].id;
+  const activeIndex = visible.findIndex(tab => tab.id === fromTabId);
+  if (activeIndex < 0) return waitingTabs[0].id;
+
+  for (let offset = 1; offset <= visible.length; offset++) {
+    const idx = (activeIndex + offset) % visible.length;
+    if (getTabEffectiveState(visible[idx]) === 'waiting') {
+      return visible[idx].id;
+    }
+  }
+  return waitingTabs[0].id;
 }
 
 export function nextTab(): void {

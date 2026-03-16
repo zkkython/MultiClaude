@@ -42,6 +42,18 @@ export interface TerminalTab {
   customName?: string;
 }
 
+export type RuntimeState = 'running' | 'waiting' | 'idle' | 'exited';
+export type RuntimeStateConfidence = 'high' | 'medium' | 'low';
+export type RuntimeStateSource = 'explicit' | 'pattern' | 'keyword' | 'timing' | 'process';
+
+export interface TerminalRuntimeState {
+  state: RuntimeState;
+  confidence: RuntimeStateConfidence;
+  reason: string;
+  source: RuntimeStateSource;
+  updatedAt: number;
+}
+
 export interface TerminalSpawnResult {
   terminalId: string;
 }
@@ -78,6 +90,87 @@ export interface AppSettings {
   groups?: TabGroupPersisted[];
 }
 
+export type RunnerEventType =
+  | 'session.started'
+  | 'output.delta'
+  | 'output.completed'
+  | 'input.requested'
+  | 'status.changed'
+  | 'session.completed'
+  | 'session.failed';
+
+export interface RunnerEvent {
+  id: string;
+  ts: number;
+  provider: ConfigProvider;
+  sessionId: string;
+  type: RunnerEventType;
+  [key: string]: any;
+}
+
+export interface RunnerStartResult {
+  sessionId: string;
+  provider: ConfigProvider;
+  linkedTerminalId?: string;
+  transportType?: 'pty' | 'http_sse';
+}
+
+export type RunnerUserInputType = 'user_response' | 'user_approve' | 'user_reject';
+
+export interface RunnerUserInput {
+  sessionId: string;
+  requestId: string;
+  type: RunnerUserInputType;
+  text?: string;
+}
+
+export interface RunnerMetricsSnapshot {
+  counters: {
+    interactionExpectedTotal: number;
+    interactionTriggeredTotal: number;
+    interactionFalsePositiveTotal: number;
+    stateComparisonTotal: number;
+    stateMismatchTotal: number;
+    fallbackAttemptTotal: number;
+    fallbackSuccessTotal: number;
+  };
+  rates: {
+    interactionRecall: number | null;
+    falsePositiveRate: number | null;
+    stateMismatchRate: number | null;
+    fallbackRecoveryRate: number | null;
+  };
+  goals: {
+    interactionRecallGte99: boolean;
+    falsePositiveRateLte0_5: boolean;
+    stateMismatchRateLte0_5: boolean;
+    fallbackRecoveryEq100: boolean;
+    allMet: boolean;
+  };
+}
+
+export interface ProtocolConnectivityCheckInput {
+  provider: ConfigProvider;
+  anthropicBaseUrl?: string;
+  anthropicAuthToken?: string;
+  openaiBaseUrl?: string;
+  openaiApiKey?: string;
+  customEnvVars?: Record<string, string>;
+}
+
+export interface ProtocolConnectivityCheckResult {
+  ok: boolean;
+  transportType: 'pty' | 'http_sse';
+  summary: string;
+  details: Array<{
+    name: string;
+    ok: boolean;
+    status?: number;
+    message: string;
+    url?: string;
+  }>;
+}
+
 // Preload API exposed to renderer
 export interface MultiClaudeAPI {
   config: {
@@ -97,6 +190,8 @@ export interface MultiClaudeAPI {
     kill(terminalId: string): void;
     onData(callback: (terminalId: string, data: string) => void): () => void;
     onExit(callback: (terminalId: string, code: number) => void): () => void;
+    onState(callback: (terminalId: string, state: TerminalRuntimeState) => void): () => void;
+    getStateSnapshot(): Promise<Record<string, TerminalRuntimeState>>;
   };
   systemTerminal: {
     open(configId: string): Promise<void>;
@@ -111,6 +206,19 @@ export interface MultiClaudeAPI {
     onNotification(callback: (title: string, body: string, terminalId?: string) => void): () => void;
     getSettings(): Promise<AppSettings>;
     saveSettings(settings: Partial<AppSettings>): Promise<void>;
+  };
+  protocol: {
+    startSession(configId: string, terminalId?: string): Promise<RunnerStartResult>;
+    ingestRawEvent(sessionId: string, rawEvent: unknown): Promise<void>;
+    resolveInput(sessionId: string, requestId: string): Promise<boolean>;
+    submitInput(input: RunnerUserInput): Promise<boolean>;
+    interruptSession(sessionId: string): Promise<boolean>;
+    stopSession(sessionId: string): Promise<boolean>;
+    endSession(sessionId: string): Promise<void>;
+    onEvent(callback: (event: RunnerEvent) => void): () => void;
+    getMetrics(): Promise<RunnerMetricsSnapshot>;
+    resetMetrics(): Promise<void>;
+    testConnectivity(input: ProtocolConnectivityCheckInput): Promise<ProtocolConnectivityCheckResult>;
   };
 }
 

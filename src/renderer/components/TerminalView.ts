@@ -9,6 +9,7 @@ interface TerminalInstance {
   fitAddon: FitAddon;
   container: HTMLElement;
   terminalId: string;
+  inputEnabled: boolean;
 }
 
 const instances = new Map<string, TerminalInstance>();
@@ -76,6 +77,8 @@ export function createTerminalView(
 
   // Wire data to PTY
   terminal.onData((data) => {
+    const current = instances.get(tabId);
+    if (!current || !current.inputEnabled) return;
     window.multiclaude.terminal.write(terminalId, data);
   });
 
@@ -90,7 +93,7 @@ export function createTerminalView(
     window.multiclaude.contextMenu.show(terminalId, terminal.hasSelection());
   });
 
-  instances.set(tabId, { terminal, fitAddon, container, terminalId });
+  instances.set(tabId, { terminal, fitAddon, container, terminalId, inputEnabled: true });
 
   // Initial fit
   requestAnimationFrame(() => {
@@ -176,6 +179,12 @@ export function setTerminalFontSize(size: number): void {
     inst.terminal.options.fontSize = size;
     inst.fitAddon.fit();
   }
+}
+
+export function setTerminalInputEnabled(tabId: string, enabled: boolean): void {
+  const instance = instances.get(tabId);
+  if (!instance) return;
+  instance.inputEnabled = enabled;
 }
 
 // Handle window resize

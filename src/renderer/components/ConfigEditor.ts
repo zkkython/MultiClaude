@@ -124,6 +124,72 @@ export function showConfigEditor(
         </div>
 
         <div class="form-group">
+          <label>Protocol Runner</label>
+          <div class="form-help">Configure structured protocol transport. Leave as PTY to keep terminal-only mode.</div>
+          <div class="protocol-grid">
+            <div class="form-group">
+              <label for="cfg-protocol-transport">Transport</label>
+              <select id="cfg-protocol-transport">
+                <option value="pty" ${((existing?.customEnvVars?.MC_PROTOCOL_TRANSPORT || 'pty').toLowerCase() === 'pty') ? 'selected' : ''}>pty</option>
+                <option value="http_sse" ${((existing?.customEnvVars?.MC_PROTOCOL_TRANSPORT || '').toLowerCase() === 'http_sse') ? 'selected' : ''}>http_sse</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="cfg-protocol-stream-url">Stream URL</label>
+              <input type="text" id="cfg-protocol-stream-url" value="${escapeAttr(existing?.customEnvVars?.MC_PROTOCOL_STREAM_URL || '')}" placeholder="optional override" />
+            </div>
+            <div class="form-group">
+              <label for="cfg-protocol-input-url">Input URL</label>
+              <input type="text" id="cfg-protocol-input-url" value="${escapeAttr(existing?.customEnvVars?.MC_PROTOCOL_INPUT_URL || '')}" placeholder="optional override" />
+            </div>
+            <div class="form-group">
+              <label for="cfg-protocol-interrupt-url">Interrupt URL</label>
+              <input type="text" id="cfg-protocol-interrupt-url" value="${escapeAttr(existing?.customEnvVars?.MC_PROTOCOL_INTERRUPT_URL || '')}" placeholder="optional override" />
+            </div>
+            <div class="form-group">
+              <label for="cfg-protocol-stop-url">Stop URL</label>
+              <input type="text" id="cfg-protocol-stop-url" value="${escapeAttr(existing?.customEnvVars?.MC_PROTOCOL_STOP_URL || '')}" placeholder="optional override" />
+            </div>
+            <div class="form-group">
+              <label for="cfg-protocol-auth-header">Auth Header</label>
+              <input type="text" id="cfg-protocol-auth-header" value="${escapeAttr(existing?.customEnvVars?.MC_PROTOCOL_AUTH_HEADER || '')}" placeholder="e.g. Authorization" />
+            </div>
+            <div class="form-group">
+              <label for="cfg-protocol-auth-token">Auth Token</label>
+              <div class="input-with-toggle">
+                <input type="password" id="cfg-protocol-auth-token" value="${escapeAttr(existing?.customEnvVars?.MC_PROTOCOL_AUTH_TOKEN || '')}" placeholder="token" />
+                <button type="button" class="btn btn-icon toggle-visibility" data-target="cfg-protocol-auth-token" title="Show/hide">👁</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="cfg-protocol-reconnect-max">Reconnect Max</label>
+              <input type="number" id="cfg-protocol-reconnect-max" value="${escapeAttr(existing?.customEnvVars?.MC_PROTOCOL_RECONNECT_MAX || '')}" min="1" step="1" placeholder="default 6" />
+            </div>
+            <div class="form-group">
+              <label for="cfg-protocol-reconnect-base-ms">Reconnect Base (ms)</label>
+              <input type="number" id="cfg-protocol-reconnect-base-ms" value="${escapeAttr(existing?.customEnvVars?.MC_PROTOCOL_RECONNECT_BASE_MS || '')}" min="100" step="100" placeholder="default 500" />
+            </div>
+            <div class="form-group">
+              <label for="cfg-waiting-detection-mode">Waiting Detection</label>
+              <select id="cfg-waiting-detection-mode">
+                <option value="" ${(existing?.customEnvVars?.MC_WAITING_DETECTION_MODE || '') === '' ? 'selected' : ''}>auto (protocol=strict)</option>
+                <option value="strict" ${(existing?.customEnvVars?.MC_WAITING_DETECTION_MODE || '') === 'strict' ? 'selected' : ''}>strict (accurate, structured only)</option>
+                <option value="heuristic" ${(existing?.customEnvVars?.MC_WAITING_DETECTION_MODE || '') === 'heuristic' ? 'selected' : ''}>heuristic (text guess)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="cfg-protocol-headers-json">Headers JSON</label>
+              <textarea id="cfg-protocol-headers-json" rows="3" placeholder='{"x-foo":"bar"}'>${escapeAttr(existing?.customEnvVars?.MC_PROTOCOL_HEADERS_JSON || '')}</textarea>
+            </div>
+          </div>
+          <div class="protocol-actions">
+            <button type="button" class="btn btn-sm" id="cfg-protocol-test">Test Connectivity</button>
+            <span class="form-help" id="cfg-protocol-test-status"></span>
+          </div>
+          <pre class="protocol-test-output hidden" id="cfg-protocol-test-output"></pre>
+        </div>
+
+        <div class="form-group">
           <label>Custom Environment Variables</label>
           <div class="form-help">Provider fields override custom variables with the same key.</div>
           <div id="custom-env-vars">
@@ -210,6 +276,9 @@ export function showConfigEditor(
   const codexHomeNameInput = modal.querySelector('#cfg-codex-home-name') as HTMLInputElement;
   const codexHomePreview = modal.querySelector('#cfg-codex-home-preview') as HTMLElement;
   const codexProviderInput = modal.querySelector('#cfg-codex-provider') as HTMLInputElement;
+  const protocolTestButton = modal.querySelector('#cfg-protocol-test') as HTMLButtonElement;
+  const protocolTestStatus = modal.querySelector('#cfg-protocol-test-status') as HTMLElement;
+  const protocolTestOutput = modal.querySelector('#cfg-protocol-test-output') as HTMLElement;
   const refreshCodexHomePreview = () => {
     const value = codexHomeNameInput.value.trim() || slugify(nameInput.value) || 'profile';
     codexHomePreview.textContent = `CODEX_HOME preview: codex-homes/${slugify(value)}`;
@@ -222,6 +291,41 @@ export function showConfigEditor(
   });
   codexHomeNameInput.addEventListener('input', refreshCodexHomePreview);
   refreshCodexHomePreview();
+
+  protocolTestButton.addEventListener('click', async () => {
+    protocolTestButton.disabled = true;
+    protocolTestStatus.textContent = 'Testing...';
+    protocolTestOutput.classList.add('hidden');
+    protocolTestOutput.textContent = '';
+
+    const draftCustomEnv = collectCustomEnvVars(modal);
+    applyProtocolEnvOverrides(draftCustomEnv, modal);
+    try {
+      const result = await window.multiclaude.protocol.testConnectivity({
+        provider: selectedProvider,
+        anthropicBaseUrl: (modal.querySelector('#cfg-anthropic-base-url') as HTMLInputElement).value.trim(),
+        anthropicAuthToken: (modal.querySelector('#cfg-anthropic-token') as HTMLInputElement).value.trim(),
+        openaiBaseUrl: (modal.querySelector('#cfg-openai-base-url') as HTMLInputElement).value.trim(),
+        openaiApiKey: (modal.querySelector('#cfg-openai-key') as HTMLInputElement).value.trim(),
+        customEnvVars: draftCustomEnv,
+      });
+      protocolTestStatus.textContent = result.summary;
+      protocolTestStatus.classList.toggle('text-success', result.ok);
+      protocolTestStatus.classList.toggle('text-danger', !result.ok);
+      protocolTestOutput.classList.remove('hidden');
+      protocolTestOutput.textContent = result.details
+        .map(item => `${item.ok ? 'OK' : 'FAIL'} ${item.name}${item.status ? ` (${item.status})` : ''}${item.url ? ` ${item.url}` : ''} - ${item.message}`)
+        .join('\n');
+    } catch (err) {
+      protocolTestStatus.textContent = `Test failed: ${formatError(err)}`;
+      protocolTestStatus.classList.remove('text-success');
+      protocolTestStatus.classList.add('text-danger');
+      protocolTestOutput.classList.remove('hidden');
+      protocolTestOutput.textContent = formatError(err);
+    } finally {
+      protocolTestButton.disabled = false;
+    }
+  });
 
   modal.querySelector('#config-save')!.addEventListener('click', () => {
     const name = nameInput.value.trim();
@@ -242,12 +346,8 @@ export function showConfigEditor(
       return;
     }
 
-    const customEnvVars: Record<string, string> = {};
-    modal.querySelectorAll('.env-var-row').forEach(row => {
-      const key = (row.querySelector('.env-key') as HTMLInputElement).value.trim();
-      const value = (row.querySelector('.env-value') as HTMLInputElement).value;
-      if (key) customEnvVars[key] = value;
-    });
+    const customEnvVars = collectCustomEnvVars(modal);
+    applyProtocolEnvOverrides(customEnvVars, modal);
 
     const data: any = {
       name,
@@ -325,4 +425,46 @@ function deriveCodexApiKeyEnvKey(provider: string): string {
 
 function escapeAttr(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function collectCustomEnvVars(modal: HTMLElement): Record<string, string> {
+  const customEnvVars: Record<string, string> = {};
+  modal.querySelectorAll('.env-var-row').forEach(row => {
+    const key = (row.querySelector('.env-key') as HTMLInputElement).value.trim();
+    const value = (row.querySelector('.env-value') as HTMLInputElement).value;
+    if (key) customEnvVars[key] = value;
+  });
+  return customEnvVars;
+}
+
+function applyProtocolEnvOverrides(customEnvVars: Record<string, string>, modal: HTMLElement): void {
+  setOrDeleteEnv(customEnvVars, 'MC_PROTOCOL_TRANSPORT', valueOf(modal, '#cfg-protocol-transport'));
+  setOrDeleteEnv(customEnvVars, 'MC_PROTOCOL_STREAM_URL', valueOf(modal, '#cfg-protocol-stream-url'));
+  setOrDeleteEnv(customEnvVars, 'MC_PROTOCOL_INPUT_URL', valueOf(modal, '#cfg-protocol-input-url'));
+  setOrDeleteEnv(customEnvVars, 'MC_PROTOCOL_INTERRUPT_URL', valueOf(modal, '#cfg-protocol-interrupt-url'));
+  setOrDeleteEnv(customEnvVars, 'MC_PROTOCOL_STOP_URL', valueOf(modal, '#cfg-protocol-stop-url'));
+  setOrDeleteEnv(customEnvVars, 'MC_PROTOCOL_AUTH_HEADER', valueOf(modal, '#cfg-protocol-auth-header'));
+  setOrDeleteEnv(customEnvVars, 'MC_PROTOCOL_AUTH_TOKEN', valueOf(modal, '#cfg-protocol-auth-token'));
+  setOrDeleteEnv(customEnvVars, 'MC_PROTOCOL_RECONNECT_MAX', valueOf(modal, '#cfg-protocol-reconnect-max'));
+  setOrDeleteEnv(customEnvVars, 'MC_PROTOCOL_RECONNECT_BASE_MS', valueOf(modal, '#cfg-protocol-reconnect-base-ms'));
+  setOrDeleteEnv(customEnvVars, 'MC_WAITING_DETECTION_MODE', valueOf(modal, '#cfg-waiting-detection-mode'));
+  setOrDeleteEnv(customEnvVars, 'MC_PROTOCOL_HEADERS_JSON', valueOf(modal, '#cfg-protocol-headers-json'));
+}
+
+function valueOf(modal: HTMLElement, selector: string): string {
+  const node = modal.querySelector(selector) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null;
+  return node ? node.value.trim() : '';
+}
+
+function setOrDeleteEnv(target: Record<string, string>, key: string, value: string): void {
+  if (value) {
+    target[key] = value;
+  } else {
+    delete target[key];
+  }
+}
+
+function formatError(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  return String(err);
 }
