@@ -156,9 +156,35 @@ npx electron .
 
 ### 构建 DMG 安装包
 
+#### 开发版（不签名、不公证）
+
+适用于本地测试，无需 Apple 开发者账号：
+
 ```bash
-pnpm run dist:mac
+pnpm run dist:mac:dev
 ```
+
+> 开发版 DMG 未经 Apple 签名，首次打开时 macOS 可能会拦截，运行 `xattr -cr /Applications/MultiClaude.app` 即可解除。
+
+#### 生产版（签名 + 公证）
+
+发布正式版本时使用，需要提供 Apple 开发者信息：
+
+```bash
+export APPLE_ID="your@apple.id"
+export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
+export APPLE_TEAM_ID="XXXXXXXXXX"
+
+pnpm run dist:mac:prod
+```
+
+| 环境变量                        | 说明                                                                 |
+| ------------------------------- | -------------------------------------------------------------------- |
+| `APPLE_ID`                      | Apple ID 邮箱                                                        |
+| `APPLE_APP_SPECIFIC_PASSWORD`   | App 专用密码（在 [appleid.apple.com](https://appleid.apple.com) 生成） |
+| `APPLE_TEAM_ID`                 | Apple 开发者团队 ID                                                   |
+
+生产版会自动进行代码签名和 Apple 公证，用户安装时不会被 Gatekeeper 拦截。
 
 产出文件：`out/MultiClaude-1.0.0-arm64.dmg`（和/或 x64 版本）
 
@@ -274,8 +300,11 @@ node scripts/build.js
 # 开发模式运行
 npx electron .
 
-# 构建可分发版本
-pnpm run dist:mac
+# 构建开发版 DMG（无签名）
+pnpm run dist:mac:dev
+
+# 构建生产版 DMG（签名 + 公证，需设置 APPLE_ID 等环境变量）
+pnpm run dist:mac:prod
 ```
 
 ---

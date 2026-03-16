@@ -1,6 +1,6 @@
 {
   "name": "multiclaude",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Run multiple Claude Code configurations in parallel terminals",
   "main": "dist/main/index.js",
   "scripts": {
@@ -11,6 +11,8 @@
     "postinstall": "electron-rebuild",
     "dist": "npm run build && electron-builder",
     "dist:mac": "npm run build && electron-builder --mac",
+    "dist:mac:dev": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac",
+    "dist:mac:prod": "npm run build && electron-builder --mac",
     "dist:win": "npm run build && electron-builder --win"
   },
   "author": "kason",

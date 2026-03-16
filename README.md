@@ -137,9 +137,35 @@ npx electron .
 
 ### Build DMG
 
+#### Dev Build (No Signing)
+
+For local testing, no Apple Developer account required:
+
 ```bash
-pnpm run dist:mac
+pnpm run dist:mac:dev
 ```
+
+> The dev DMG is unsigned. On first launch, macOS may block it — run `xattr -cr /Applications/MultiClaude.app` to bypass.
+
+#### Production Build (Signed + Notarized)
+
+For official releases. Requires Apple Developer credentials:
+
+```bash
+export APPLE_ID="your@apple.id"
+export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
+export APPLE_TEAM_ID="XXXXXXXXXX"
+
+pnpm run dist:mac:prod
+```
+
+| Env Variable                    | Description                                                              |
+| ------------------------------- | ------------------------------------------------------------------------ |
+| `APPLE_ID`                      | Your Apple ID email                                                      |
+| `APPLE_APP_SPECIFIC_PASSWORD`   | App-specific password (generate at [appleid.apple.com](https://appleid.apple.com)) |
+| `APPLE_TEAM_ID`                 | Apple Developer Team ID                                                  |
+
+The production build automatically code-signs and notarizes the app, so users won't see Gatekeeper warnings.
 
 Output: `out/MultiClaude-1.0.0-arm64.dmg` (and/or x64)
 
@@ -247,8 +273,11 @@ node scripts/build.js
 # Run in dev mode
 npx electron .
 
-# Build distributable
-pnpm run dist:mac
+# Build dev DMG (unsigned)
+pnpm run dist:mac:dev
+
+# Build production DMG (signed + notarized, requires APPLE_ID env vars)
+pnpm run dist:mac:prod
 ```
 
 ## Contributing
