@@ -14,7 +14,8 @@
     "dist:mac": "npm run build && node scripts/dist-mac-keychain.js",
     "dist:win": "npm run build && electron-builder --win",
     "dist:mac:p12": "npm run build && electron-builder --mac",
-    "dist:mac:nonotarize": "npm run build && node scripts/dist-mac-nonotarize.js"
+    "dist:mac:nonotarize": "npm run build && node scripts/dist-mac-nonotarize.js",
+    "test": "node scripts/test.js"
   },
   "author": "kason",
   "license": "MIT",

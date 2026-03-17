@@ -18,6 +18,8 @@ import { createWelcomeScreen } from './components/WelcomeScreen.js';
 import { createStatusBar } from './components/StatusBar.js';
 import type {
   ModelConfig,
+  RuntimeState,
+  RuntimeStateConfidence,
   RunnerEvent,
   TerminalRuntimeState,
   TerminalTab,
@@ -290,6 +292,7 @@ function onRunnerEvent(event: RunnerEvent): void {
   const tabId = runnerSessionToTab.get(event.sessionId);
   if (!tabId) return;
 
+  applyRuntimeHintFromRunnerEvent(tabId, event);
   runnerLastEventByTab.set(tabId, event.type);
   if (event.type === 'status.changed') {
     if (event.to === 'fallback_pty') {
@@ -302,6 +305,50 @@ function onRunnerEvent(event: RunnerEvent): void {
     }
   }
   void refreshProtocolMetrics();
+}
+
+function applyRuntimeHintFromRunnerEvent(tabId: string, event: RunnerEvent): void {
+  const updatedAt = Number.isFinite(event.ts) ? event.ts : Date.now();
+  if (event.type === 'input.requested') {
+    setTabRuntimeState(tabId, buildRuntimeState('waiting', 'protocol input requested', updatedAt, 'high'));
+    return;
+  }
+  if (event.type === 'status.changed') {
+    if (event.to === 'awaiting_input') {
+      setTabRuntimeState(tabId, buildRuntimeState('waiting', 'protocol awaiting input', updatedAt, 'high'));
+      return;
+    }
+    if (event.to === 'streaming' || event.to === 'fallback_pty') {
+      setTabRuntimeState(tabId, buildRuntimeState('running', `protocol status changed: ${event.to}`, updatedAt, 'high'));
+      return;
+    }
+    if (event.to === 'idle' || event.to === 'completed') {
+      setTabRuntimeState(tabId, buildRuntimeState('idle', `protocol status changed: ${event.to}`, updatedAt, 'high'));
+      return;
+    }
+  }
+  if (event.type === 'session.completed') {
+    setTabRuntimeState(tabId, buildRuntimeState('idle', 'protocol session completed', updatedAt, 'high'));
+    return;
+  }
+  if (event.type === 'session.failed') {
+    setTabRuntimeState(tabId, buildRuntimeState('running', 'protocol session failed', updatedAt, 'medium'));
+  }
+}
+
+function buildRuntimeState(
+  state: RuntimeState,
+  reason: string,
+  updatedAt: number,
+  confidence: RuntimeStateConfidence,
+): TerminalRuntimeState {
+  return {
+    state,
+    confidence,
+    reason,
+    source: 'explicit',
+    updatedAt,
+  };
 }
 
 async function refreshProtocolMetrics(): Promise<void> {

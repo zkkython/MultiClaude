@@ -25,6 +25,7 @@ interface DetectionResult {
 const IDLE_THRESHOLD_MS = 15_000;
 const STATE_DEBOUNCE_MS = 300;
 const WAITING_COOLDOWN_MS = 3_000;
+const WAITING_SUBMIT_SETTLE_MS = 700;
 
 const EXPLICIT_MARKER_RE = /__MC_STATE__:(waiting|running|idle|done|exited)/i;
 const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
@@ -33,7 +34,7 @@ const CONTROL_CHARS_RE = /[\u0000-\u0008\u000b-\u001f\u007f]/g;
 export class AgentStateEngine {
   private sessions = new Map<string, AgentStateSession>();
 
-  private waitingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private submitResolutionTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   private onStateChange: ((payload: RuntimeStatePayload) => void) | null = null;
 
@@ -49,7 +50,7 @@ export class AgentStateEngine {
 
   registerTerminal(terminalId: string): void {
     const now = Date.now();
-    this.clearWaitingTimer(terminalId);
+    this.clearSubmitResolutionTimer(terminalId);
     this.sessions.set(terminalId, {
       state: 'running',
       confidence: 'medium',
@@ -64,7 +65,7 @@ export class AgentStateEngine {
   }
 
   unregisterTerminal(terminalId: string): void {
-    this.clearWaitingTimer(terminalId);
+    this.clearSubmitResolutionTimer(terminalId);
     this.sessions.delete(terminalId);
   }
 
@@ -73,12 +74,25 @@ export class AgentStateEngine {
     if (!session) return;
     session.lastInputAt = Date.now();
     if (session.state === 'waiting') {
-      // Waiting should only be resolved by explicit submit/cancel actions
+      // Waiting should only react to explicit submit/cancel actions
       // (e.g. Enter/Esc), not by navigation keys or in-progress typing.
-      if (!hasSubmitInput(input) && !hasCancelInput(input)) return;
+      if (hasCancelInput(input)) {
+        this.clearSubmitResolutionTimer(terminalId);
+        this.transitionState(terminalId, {
+          state: 'running',
+          confidence: 'medium',
+          reason: 'waiting cancelled by user',
+          source: 'timing',
+        });
+        return;
+      }
+      if (hasSubmitInput(input)) {
+        this.scheduleSubmitResolution(terminalId);
+      }
+      return;
     }
     if (hasMeaningfulInput(input)) {
-      this.clearWaitingTimer(terminalId);
+      this.clearSubmitResolutionTimer(terminalId);
       this.transitionState(terminalId, {
         state: 'running',
         confidence: 'medium',
@@ -97,13 +111,13 @@ export class AgentStateEngine {
 
     const explicit = this.findExplicitState(lines);
     if (explicit) {
-      this.clearWaitingTimer(terminalId);
+      this.clearSubmitResolutionTimer(terminalId);
       this.transitionState(terminalId, explicit);
     } else if (session.state === 'waiting') {
       // Once waiting is active, plain output/noise must not clear it.
       return stripExplicitMarkerLines(data);
     } else {
-      this.clearWaitingTimer(terminalId);
+      this.clearSubmitResolutionTimer(terminalId);
       this.transitionState(terminalId, {
         state: 'running',
         confidence: 'low',
@@ -116,7 +130,7 @@ export class AgentStateEngine {
   }
 
   onExit(terminalId: string): void {
-    this.clearWaitingTimer(terminalId);
+    this.clearSubmitResolutionTimer(terminalId);
     this.transitionState(terminalId, {
       state: 'exited',
       confidence: 'high',
@@ -137,7 +151,7 @@ export class AgentStateEngine {
     if (state === 'running' || state === 'idle' || state === 'waiting') {
       session.lastOutputAt = now;
     }
-    this.clearWaitingTimer(terminalId);
+    this.clearSubmitResolutionTimer(terminalId);
     this.transitionState(terminalId, {
       state,
       confidence,
@@ -167,7 +181,7 @@ export class AgentStateEngine {
       for (const [terminalId, session] of this.sessions) {
         if (session.state === 'exited' || session.state === 'waiting') continue;
         if (now - session.lastOutputAt >= IDLE_THRESHOLD_MS) {
-          this.clearWaitingTimer(terminalId);
+          this.clearSubmitResolutionTimer(terminalId);
           this.transitionState(terminalId, {
             state: 'idle',
             confidence: 'medium',
@@ -182,11 +196,35 @@ export class AgentStateEngine {
     }
   }
 
-  private clearWaitingTimer(terminalId: string): void {
-    const timer = this.waitingTimers.get(terminalId);
+  private clearSubmitResolutionTimer(terminalId: string): void {
+    const timer = this.submitResolutionTimers.get(terminalId);
     if (!timer) return;
     clearTimeout(timer);
-    this.waitingTimers.delete(terminalId);
+    this.submitResolutionTimers.delete(terminalId);
+  }
+
+  private scheduleSubmitResolution(terminalId: string): void {
+    const session = this.sessions.get(terminalId);
+    if (!session) return;
+    const submitObservedAt = Date.now();
+    this.clearSubmitResolutionTimer(terminalId);
+    const timer = setTimeout(() => {
+      const current = this.sessions.get(terminalId);
+      if (!current) return;
+      // If explicit waiting got refreshed for a new question in the meantime,
+      // keep waiting and ignore this submit resolution.
+      if (current.state !== 'waiting' || current.lastStateAt > submitObservedAt) return;
+      this.transitionState(terminalId, {
+        state: 'running',
+        confidence: 'medium',
+        reason: 'waiting submit confirmed',
+        source: 'timing',
+      });
+    }, WAITING_SUBMIT_SETTLE_MS);
+    if (typeof (timer as any).unref === 'function') {
+      (timer as any).unref();
+    }
+    this.submitResolutionTimers.set(terminalId, timer);
   }
 
   private findExplicitState(lines: string[]): DetectionResult | null {
@@ -210,7 +248,11 @@ export class AgentStateEngine {
     if (!session) return;
     const now = Date.now();
 
-    if (!force && next.state === 'waiting' && now < session.waitingCooldownUntil) {
+    if (next.state === 'waiting') {
+      this.clearSubmitResolutionTimer(terminalId);
+    }
+
+    if (!force && next.state === 'waiting' && next.source !== 'explicit' && now < session.waitingCooldownUntil) {
       return;
     }
 
