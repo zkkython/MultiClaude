@@ -186,6 +186,10 @@ export function showConfigEditor(
             <button type="button" class="btn btn-sm" id="cfg-protocol-test">Test Connectivity</button>
             <span class="form-help" id="cfg-protocol-test-status"></span>
           </div>
+          <div class="protocol-actions">
+            <button type="button" class="btn btn-sm" id="cfg-claude-hooks-install">Install Claude Hooks</button>
+            <span class="form-help" id="cfg-claude-hooks-status"></span>
+          </div>
           <pre class="protocol-test-output hidden" id="cfg-protocol-test-output"></pre>
         </div>
 
@@ -220,6 +224,8 @@ export function showConfigEditor(
         const isTarget = (section as HTMLElement).dataset.providerFields === selectedProvider;
         section.classList.toggle('hidden', !isTarget);
       });
+      refreshClaudeHooksControls();
+      void loadClaudeHooksStatus();
     });
   });
 
@@ -279,10 +285,43 @@ export function showConfigEditor(
   const protocolTestButton = modal.querySelector('#cfg-protocol-test') as HTMLButtonElement;
   const protocolTestStatus = modal.querySelector('#cfg-protocol-test-status') as HTMLElement;
   const protocolTestOutput = modal.querySelector('#cfg-protocol-test-output') as HTMLElement;
+  const claudeHooksInstallButton = modal.querySelector('#cfg-claude-hooks-install') as HTMLButtonElement;
+  const claudeHooksStatus = modal.querySelector('#cfg-claude-hooks-status') as HTMLElement;
+  const refreshClaudeHooksControls = () => {
+    const enabled = selectedProvider === 'claude';
+    claudeHooksInstallButton.disabled = !enabled;
+    if (!enabled) {
+      claudeHooksStatus.textContent = 'Claude provider only';
+      claudeHooksStatus.classList.remove('text-success', 'text-danger');
+    }
+  };
+  const loadClaudeHooksStatus = async () => {
+    if (selectedProvider !== 'claude') return;
+    claudeHooksStatus.textContent = 'Checking hook status...';
+    claudeHooksStatus.classList.remove('text-success', 'text-danger');
+    try {
+      const status = await window.multiclaude.protocol.getClaudeHooksStatus();
+      if (status.installed) {
+        claudeHooksStatus.textContent = `Installed (${status.settingsPath})`;
+        claudeHooksStatus.classList.add('text-success');
+      } else {
+        const extra = status.missingEvents.length > 0
+          ? ` missing: ${status.missingEvents.join(', ')}`
+          : '';
+        claudeHooksStatus.textContent = `Not installed (${status.settingsPath})${extra}${status.error ? `; ${status.error}` : ''}`;
+        claudeHooksStatus.classList.add('text-danger');
+      }
+    } catch (err) {
+      claudeHooksStatus.textContent = `Check failed: ${formatError(err)}`;
+      claudeHooksStatus.classList.add('text-danger');
+    }
+  };
   const refreshCodexHomePreview = () => {
     const value = codexHomeNameInput.value.trim() || slugify(nameInput.value) || 'profile';
     codexHomePreview.textContent = `CODEX_HOME preview: codex-homes/${slugify(value)}`;
   };
+  refreshClaudeHooksControls();
+  void loadClaudeHooksStatus();
   nameInput.addEventListener('input', () => {
     if (!codexHomeNameInput.value.trim()) {
       codexHomeNameInput.value = slugify(nameInput.value);
@@ -324,6 +363,28 @@ export function showConfigEditor(
       protocolTestOutput.textContent = formatError(err);
     } finally {
       protocolTestButton.disabled = false;
+    }
+  });
+
+  claudeHooksInstallButton.addEventListener('click', async () => {
+    if (selectedProvider !== 'claude') return;
+    claudeHooksInstallButton.disabled = true;
+    claudeHooksStatus.textContent = 'Installing hooks...';
+    claudeHooksStatus.classList.remove('text-success', 'text-danger');
+    try {
+      const status = await window.multiclaude.protocol.installClaudeHooks();
+      if (status.installed) {
+        claudeHooksStatus.textContent = `Installed (${status.settingsPath})`;
+        claudeHooksStatus.classList.add('text-success');
+      } else {
+        claudeHooksStatus.textContent = `Install incomplete: missing ${status.missingEvents.join(', ')}`;
+        claudeHooksStatus.classList.add('text-danger');
+      }
+    } catch (err) {
+      claudeHooksStatus.textContent = `Install failed: ${formatError(err)}`;
+      claudeHooksStatus.classList.add('text-danger');
+    } finally {
+      refreshClaudeHooksControls();
     }
   });
 

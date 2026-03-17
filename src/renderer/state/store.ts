@@ -184,22 +184,30 @@ export function getVisibleTabs(): TerminalTab[] {
 }
 
 export function findNextWaitingTabId(fromTabId?: string | null): string | null {
-  const visible = getVisibleTabs();
-  if (visible.length === 0) return null;
-  const waitingTabs = visible.filter(tab => getTabEffectiveState(tab) === 'waiting');
+  const ordered = getOrderedTabsIncludingCollapsed(state);
+  if (ordered.length === 0) return null;
+  const waitingTabs = ordered.filter(tab => getTabEffectiveState(tab) === 'waiting');
   if (waitingTabs.length === 0) return null;
 
   if (!fromTabId) return waitingTabs[0].id;
-  const activeIndex = visible.findIndex(tab => tab.id === fromTabId);
+  const activeIndex = ordered.findIndex(tab => tab.id === fromTabId);
   if (activeIndex < 0) return waitingTabs[0].id;
 
-  for (let offset = 1; offset <= visible.length; offset++) {
-    const idx = (activeIndex + offset) % visible.length;
-    if (getTabEffectiveState(visible[idx]) === 'waiting') {
-      return visible[idx].id;
+  for (let offset = 1; offset <= ordered.length; offset++) {
+    const idx = (activeIndex + offset) % ordered.length;
+    if (getTabEffectiveState(ordered[idx]) === 'waiting') {
+      return ordered[idx].id;
     }
   }
   return waitingTabs[0].id;
+}
+
+export function expandGroupForTab(tabId: string): void {
+  const group = state.groups.find(g => g.tabIds.includes(tabId));
+  if (!group || !group.collapsed) return;
+  setState({
+    groups: state.groups.map(g => (g.id === group.id ? { ...g, collapsed: false } : g)),
+  });
 }
 
 export function nextTab(): void {
@@ -410,4 +418,20 @@ export function getUngroupedTabs(): TerminalTab[] {
     for (const tid of g.tabIds) grouped.add(tid);
   }
   return state.tabs.filter(t => !grouped.has(t.id));
+}
+
+function getOrderedTabsIncludingCollapsed(s: AppState): TerminalTab[] {
+  const ordered: TerminalTab[] = [];
+  const grouped = new Set<string>();
+  for (const group of s.groups) {
+    for (const tid of group.tabIds) {
+      grouped.add(tid);
+      const tab = s.tabs.find(t => t.id === tid);
+      if (tab) ordered.push(tab);
+    }
+  }
+  for (const tab of s.tabs) {
+    if (!grouped.has(tab.id)) ordered.push(tab);
+  }
+  return ordered;
 }

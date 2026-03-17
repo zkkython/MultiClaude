@@ -110,6 +110,11 @@ export class AgentStateEngine {
     const session = this.sessions.get(terminalId);
     if (!session) return;
     session.lastInputAt = Date.now();
+    if (session.state === 'waiting') {
+      // Waiting should only be resolved by explicit submit/cancel actions
+      // (e.g. Enter/Esc), not by navigation keys or in-progress typing.
+      if (!hasSubmitInput(input) && !hasCancelInput(input)) return;
+    }
     if (hasMeaningfulInput(input)) {
       this.clearWaitingTimer(terminalId);
       this.transitionState(terminalId, {
@@ -138,6 +143,9 @@ export class AgentStateEngine {
     if (explicit) {
       this.clearWaitingTimer(terminalId);
       this.transitionState(terminalId, explicit);
+    } else if (session.state === 'waiting') {
+      // Once waiting is active, plain output/noise must not clear it.
+      return stripExplicitMarkerLines(data);
     } else if (session.detectionMode === 'strict') {
       this.clearWaitingTimer(terminalId);
       this.transitionState(terminalId, {
@@ -174,6 +182,27 @@ export class AgentStateEngine {
       confidence: 'high',
       reason: 'pty exited',
       source: 'process',
+    }, true);
+  }
+
+  applyExplicitState(
+    terminalId: string,
+    state: RuntimeState,
+    reason: string,
+    confidence: RuntimeStateConfidence = 'high'
+  ): void {
+    const session = this.sessions.get(terminalId);
+    if (!session) return;
+    const now = Date.now();
+    if (state === 'running' || state === 'idle' || state === 'waiting') {
+      session.lastOutputAt = now;
+    }
+    this.clearWaitingTimer(terminalId);
+    this.transitionState(terminalId, {
+      state,
+      confidence,
+      reason,
+      source: 'explicit',
     }, true);
   }
 
@@ -357,7 +386,26 @@ function stripExplicitMarkerLines(input: string): string {
 }
 
 function hasMeaningfulInput(input: string): boolean {
-  return /[\r\n\t -~]/.test(input);
+  if (!input) return false;
+  // Keep Enter as an explicit user action, but ignore terminal control sequences
+  // (focus in/out, arrows, etc.) that should not resolve waiting.
+  if (/[\r\n]/.test(input)) return true;
+  const stripped = input
+    // SS3 sequences (e.g. ESC O A/B/C/D in application cursor mode)
+    .replace(/\x1bO./g, '')
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1b[@-~]/g, '')
+    .replace(CONTROL_CHARS_RE, '');
+  return /[^\s]/.test(stripped);
+}
+
+function hasSubmitInput(input: string): boolean {
+  return /[\r\n]/.test(input);
+}
+
+function hasCancelInput(input: string): boolean {
+  // Esc key in xterm typically emits a single ESC byte.
+  return /^\x1b+$/.test(input);
 }
 
 function matchesStructuredQuestion(lines: string[]): boolean {

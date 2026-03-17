@@ -77,6 +77,8 @@ const api: MultiClaudeAPI = {
     getMetrics: () => ipcRenderer.invoke(IPC.RUNNER_METRICS_GET),
     resetMetrics: () => ipcRenderer.invoke(IPC.RUNNER_METRICS_RESET),
     testConnectivity: (input) => ipcRenderer.invoke(IPC.RUNNER_CONNECTIVITY_TEST, input),
+    getClaudeHooksStatus: () => ipcRenderer.invoke(IPC.RUNNER_CLAUDE_HOOKS_STATUS_GET),
+    installClaudeHooks: () => ipcRenderer.invoke(IPC.RUNNER_CLAUDE_HOOKS_INSTALL),
   },
 };
 

@@ -1,6 +1,9 @@
 import { ipcMain, BrowserWindow, dialog, Menu, Notification } from 'electron';
 import * as http from 'http';
 import { randomBytes } from 'crypto';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import * as os from 'os';
 import { IPC } from '../shared/constants.js';
 import * as configStore from './config-store.js';
 import { buildEnvForConfig } from './env-builder.js';
@@ -14,6 +17,7 @@ import { PtyProtocolSessionTransport, type ProtocolSessionTransport } from './pr
 import { HttpSseProtocolSessionTransport } from './protocol-http-transport.js';
 import type { ModelConfig } from '../shared/types.js';
 import type { ProtocolConnectivityCheckInput, ProtocolConnectivityCheckResult } from '../shared/types.js';
+import type { ClaudeHooksStatus } from '../shared/types.js';
 
 let nanoid: (size?: number) => string;
 const agentStateEngine = new AgentStateEngine();
@@ -21,14 +25,26 @@ const protocolRunnerBridge = new ProtocolRunnerBridge();
 const runnerSessionToTerminal = new Map<string, string>();
 const terminalToRunnerSession = new Map<string, string>();
 const runnerTransportBySession = new Map<string, ProtocolSessionTransport>();
+const pendingInputSessions = new Set<string>();
 const sidechannelTokenByTerminal = new Map<string, string>();
 const sidechannelPendingByTerminal = new Map<string, unknown[]>();
 const SIDECAR_EVENT_PATH = '/v1/runner/event';
 const SIDECAR_MAX_QUEUE_PER_TERMINAL = 128;
 const SIDECAR_MAX_BODY_BYTES = 128 * 1024;
+const CLAUDE_HOOK_EVENTS = [
+  'Stop',
+  'SubagentStop',
+  'Notification',
+  'PermissionRequest',
+  'UserPromptSubmit',
+  'PreToolUse',
+  'PostToolUse',
+  'SessionStart',
+] as const;
 let sidechannelServer: http.Server | null = null;
 let sidechannelPort: number | null = null;
 let sidechannelStarting: Promise<void> | null = null;
+let hasWarnedClaudeHooksMissing = false;
 
 async function ensureNanoid() {
   if (!nanoid) {
@@ -118,6 +134,17 @@ export function registerIpcHandlers(): void {
     const terminalId = nanoid(12);
     const env = buildEnvForConfig(config);
     await ensureCodexApiKeyLogin(config, env);
+    if (config.provider === 'claude') {
+      const status = await getClaudeHooksStatus();
+      if (!status.installed && !hasWarnedClaudeHooksMissing) {
+        hasWarnedClaudeHooksMissing = true;
+        console.warn('Claude hooks are not fully installed; waiting detection may degrade.', {
+          settingsPath: status.settingsPath,
+          missingEvents: status.missingEvents,
+          error: status.error,
+        });
+      }
+    }
     await injectRunnerSidechannelEnv(terminalId, env);
     agentStateEngine.registerTerminal(terminalId, config.provider, resolveWaitingDetectionMode(config));
 
@@ -208,6 +235,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.RUNNER_INPUT_SUBMIT, (_event, input: RunnerUserInput) => {
     const accepted = protocolRunnerBridge.resolveInput(input.sessionId, input.requestId);
     if (!accepted) return false;
+    pendingInputSessions.delete(input.sessionId);
 
     const transport = runnerTransportBySession.get(input.sessionId);
     if (transport) {
@@ -215,7 +243,7 @@ export function registerIpcHandlers(): void {
     }
 
     const provider = protocolRunnerBridge.getSessionProvider(input.sessionId) ?? 'codex';
-    notifyRunnerEvent({
+    const localEvent = {
       id: `runner-local-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`,
       ts: Date.now(),
       provider,
@@ -224,7 +252,9 @@ export function registerIpcHandlers(): void {
       from: 'awaiting_input',
       to: 'streaming',
       reason: input.type,
-    });
+    };
+    applyRuntimeStateFromRunnerEvent(input.sessionId, localEvent);
+    notifyRunnerEvent(localEvent);
     return true;
   });
 
@@ -257,6 +287,15 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.RUNNER_CONNECTIVITY_TEST, async (_event, input: ProtocolConnectivityCheckInput) => {
     return await runProtocolConnectivityTest(input);
+  });
+
+  ipcMain.handle(IPC.RUNNER_CLAUDE_HOOKS_STATUS_GET, async () => {
+    return await getClaudeHooksStatus();
+  });
+
+  ipcMain.handle(IPC.RUNNER_CLAUDE_HOOKS_INSTALL, async () => {
+    await installClaudeHooksConfig();
+    return await getClaudeHooksStatus();
   });
 
   // System terminal
@@ -351,8 +390,10 @@ function notifyTerminalExit(terminalId: string, code: number): void {
 
 function dispatchRunnerEvents(sessionId: string, events: Array<any>): void {
   for (const event of events) {
+    applyRuntimeStateFromRunnerEvent(sessionId, event);
     notifyRunnerEvent(event);
     if (event.type === 'session.completed' || event.type === 'session.failed') {
+      pendingInputSessions.delete(sessionId);
       protocolRunnerBridge.endSession(sessionId);
       cleanupRunnerSessionById(sessionId);
     }
@@ -380,6 +421,7 @@ function cleanupRunnerSessionByTerminal(terminalId: string): void {
 }
 
 function cleanupRunnerSessionById(sessionId: string): void {
+  pendingInputSessions.delete(sessionId);
   const terminalId = runnerSessionToTerminal.get(sessionId);
   if (terminalId) {
     terminalToRunnerSession.delete(terminalId);
@@ -551,6 +593,7 @@ function normalizeSidechannelPayload(payload: Record<string, unknown>, terminalI
   const state = readString(payload.state)?.toLowerCase();
   if (!state) return null;
   const now = Date.now();
+  const hookEventName = readHookEventName(payload);
   if (state === 'waiting') {
     const inputKind = readString(payload.inputKind) === 'text' ? 'text' : 'approval';
     const requestId = readString(payload.requestId) || `side-wait-${terminalId}-${now}`;
@@ -561,6 +604,7 @@ function normalizeSidechannelPayload(payload: Record<string, unknown>, terminalI
         inputKind,
         requestId,
         prompt,
+        hookEventName,
         source: 'sidechannel',
       },
     };
@@ -571,7 +615,8 @@ function normalizeSidechannelPayload(payload: Record<string, unknown>, terminalI
         type: 'status.changed',
         from: 'awaiting_input',
         to: 'streaming',
-        reason: 'sidechannel-running',
+        reason: hookEventName ? `sidechannel-running:${hookEventName}` : 'sidechannel-running',
+        hookEventName,
         source: 'sidechannel',
       },
     };
@@ -581,7 +626,8 @@ function normalizeSidechannelPayload(payload: Record<string, unknown>, terminalI
       type: 'status.changed',
       from: 'streaming',
       to: state,
-      reason: 'sidechannel-state',
+      reason: hookEventName ? `sidechannel-state:${hookEventName}` : 'sidechannel-state',
+      hookEventName,
       source: 'sidechannel',
     },
   };
@@ -614,6 +660,179 @@ function readString(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+function readHookEventName(payload: Record<string, unknown>): string | null {
+  const direct = readString(payload.hookEventName);
+  if (direct) return direct;
+  const rawHook = payload.rawHookEvent;
+  if (!rawHook || typeof rawHook !== 'object' || Array.isArray(rawHook)) return null;
+  return readString((rawHook as Record<string, unknown>).hook_event_name);
+}
+
+async function getClaudeHooksStatus(): Promise<ClaudeHooksStatus> {
+  const info = await resolveClaudeHookIntegrationInfo();
+  if (!info.scriptExists) {
+    return {
+      installed: false,
+      settingsPath: info.settingsPath,
+      hookScriptPath: info.hookScriptPath,
+      command: info.command,
+      missingEvents: [...CLAUDE_HOOK_EVENTS],
+      error: 'hook script not found',
+    };
+  }
+  try {
+    const settings = await readClaudeSettingsObject(info.settingsPath);
+    const hooks = ensureRecord(settings, 'hooks');
+    const missingEvents = CLAUDE_HOOK_EVENTS.filter((eventName) => !hasHookEntry(hooks, eventName, info.command));
+    return {
+      installed: missingEvents.length === 0,
+      settingsPath: info.settingsPath,
+      hookScriptPath: info.hookScriptPath,
+      command: info.command,
+      missingEvents,
+    };
+  } catch (err) {
+    return {
+      installed: false,
+      settingsPath: info.settingsPath,
+      hookScriptPath: info.hookScriptPath,
+      command: info.command,
+      missingEvents: [...CLAUDE_HOOK_EVENTS],
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+async function installClaudeHooksConfig(): Promise<void> {
+  const info = await resolveClaudeHookIntegrationInfo();
+  if (!info.scriptExists) {
+    throw new Error(`hook script not found: ${info.hookScriptPath}`);
+  }
+  const settings = await readClaudeSettingsObject(info.settingsPath);
+  const hooks = ensureRecord(settings, 'hooks');
+  for (const eventName of CLAUDE_HOOK_EVENTS) {
+    ensureHookEntry(hooks, eventName, info.command);
+  }
+  await fs.mkdir(path.dirname(info.settingsPath), { recursive: true });
+  await fs.writeFile(info.settingsPath, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
+}
+
+async function resolveClaudeHookIntegrationInfo(): Promise<{
+  hookScriptPath: string;
+  settingsPath: string;
+  command: string;
+  scriptExists: boolean;
+}> {
+  const settingsPath = path.resolve(os.homedir(), '.claude/settings.json');
+  const candidates = [
+    path.resolve(process.cwd(), 'scripts/hooks/claude-runner-sidechannel.js'),
+    path.resolve(__dirname, '../../scripts/hooks/claude-runner-sidechannel.js'),
+  ];
+  let hookScriptPath = candidates[0];
+  let scriptExists = false;
+  for (const candidate of candidates) {
+    try {
+      await fs.access(candidate);
+      hookScriptPath = candidate;
+      scriptExists = true;
+      break;
+    } catch {
+      // continue
+    }
+  }
+  return {
+    hookScriptPath,
+    settingsPath,
+    command: `node ${hookScriptPath}`,
+    scriptExists,
+  };
+}
+
+async function readClaudeSettingsObject(settingsPath: string): Promise<Record<string, unknown>> {
+  let raw = '';
+  try {
+    raw = await fs.readFile(settingsPath, 'utf8');
+  } catch (err: any) {
+    if (err && err.code === 'ENOENT') {
+      return {};
+    }
+    throw err;
+  }
+  if (!raw.trim()) return {};
+  const parsed = JSON.parse(raw);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Invalid settings root (must be JSON object)');
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function ensureRecord(parent: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = parent[key];
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  const next: Record<string, unknown> = {};
+  parent[key] = next;
+  return next;
+}
+
+function ensureHookEntry(hooks: Record<string, unknown>, eventName: string, command: string): void {
+  let eventList: Array<Record<string, unknown>> = [];
+  const current = hooks[eventName];
+  if (Array.isArray(current)) {
+    eventList = current.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item));
+  }
+
+  const hasCommand = eventList.some((entry) => {
+    const hookItems = entry.hooks;
+    if (!Array.isArray(hookItems)) return false;
+    return hookItems.some((hookItem) => {
+      if (!hookItem || typeof hookItem !== 'object' || Array.isArray(hookItem)) return false;
+      const record = hookItem as Record<string, unknown>;
+      return record.type === 'command' && record.command === command;
+    });
+  });
+
+  if (hasCommand) {
+    hooks[eventName] = eventList;
+    return;
+  }
+
+  const commandHook = {
+    type: 'command',
+    command,
+  };
+  if (eventName === 'PreToolUse' || eventName === 'PostToolUse') {
+    eventList.push({
+      matcher: '*',
+      hooks: [commandHook],
+    });
+  } else {
+    eventList.push({
+      hooks: [commandHook],
+    });
+  }
+  hooks[eventName] = eventList;
+}
+
+function hasHookEntry(hooks: Record<string, unknown>, eventName: string, command: string): boolean {
+  const current = hooks[eventName];
+  if (!Array.isArray(current)) return false;
+  for (const entry of current) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const hookItems = (entry as Record<string, unknown>).hooks;
+    if (!Array.isArray(hookItems)) continue;
+    for (const hookItem of hookItems) {
+      if (!hookItem || typeof hookItem !== 'object' || Array.isArray(hookItem)) continue;
+      const record = hookItem as Record<string, unknown>;
+      if (record.type === 'command' && record.command === command) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function createSessionTransport(
@@ -742,11 +961,71 @@ function parsePositiveInt(value: string | undefined): number | undefined {
 function processTransportRawEvent(sessionId: string, rawEvent: unknown): void {
   const marker = asRunnerEventMarker(rawEvent);
   if (marker) {
-    notifyRunnerEvent(enrichLocalRunnerEvent(sessionId, marker));
+    const event = enrichLocalRunnerEvent(sessionId, marker);
+    applyRuntimeStateFromRunnerEvent(sessionId, event);
+    notifyRunnerEvent(event);
     return;
   }
   const events = protocolRunnerBridge.ingestRawEvent(sessionId, rawEvent);
   dispatchRunnerEvents(sessionId, events);
+}
+
+function applyRuntimeStateFromRunnerEvent(sessionId: string, event: Record<string, unknown>): void {
+  const terminalId = runnerSessionToTerminal.get(sessionId);
+  if (!terminalId) return;
+  const type = typeof event.type === 'string' ? event.type : '';
+  if (type === 'input.requested') {
+    pendingInputSessions.add(sessionId);
+    agentStateEngine.applyExplicitState(terminalId, 'waiting', 'protocol input requested', 'high');
+    return;
+  }
+  if (type === 'status.changed') {
+    const to = typeof event.to === 'string' ? event.to : '';
+    const hasPendingInput = pendingInputSessions.has(sessionId);
+    if (to === 'streaming' || to === 'fallback_pty') {
+      if (hasPendingInput && !isPendingInputResolvedEvent(event)) {
+        return;
+      }
+      pendingInputSessions.delete(sessionId);
+      agentStateEngine.applyExplicitState(terminalId, 'running', 'protocol session streaming', 'high');
+      return;
+    }
+    if (to === 'idle') {
+      if (hasPendingInput) return;
+      agentStateEngine.applyExplicitState(terminalId, 'idle', 'protocol session idle', 'high');
+      return;
+    }
+    if (to === 'awaiting_input') {
+      pendingInputSessions.add(sessionId);
+      agentStateEngine.applyExplicitState(terminalId, 'waiting', 'protocol awaiting input', 'high');
+      return;
+    }
+  }
+  if (type === 'session.completed') {
+    pendingInputSessions.delete(sessionId);
+    agentStateEngine.applyExplicitState(terminalId, 'idle', 'protocol session completed', 'high');
+    return;
+  }
+  if (type === 'session.failed') {
+    pendingInputSessions.delete(sessionId);
+    agentStateEngine.applyExplicitState(terminalId, 'running', 'protocol session failed', 'medium');
+  }
+}
+
+function isPendingInputResolvedEvent(event: Record<string, unknown>): boolean {
+  const reason = typeof event.reason === 'string' ? event.reason.trim().toLowerCase() : '';
+  // Local explicit submit path (RUNNER_INPUT_SUBMIT).
+  if (reason === 'approval' || reason === 'text') return true;
+  const explicitHook = typeof event.hookEventName === 'string'
+    ? event.hookEventName.trim().toLowerCase()
+    : '';
+  const reasonHook = reason.includes(':')
+    ? reason.split(':').slice(1).join(':').trim().toLowerCase()
+    : '';
+  const hookName = explicitHook || reasonHook;
+
+  // Sidechannel explicit submit path only.
+  return hookName === 'userpromptsubmit';
 }
 
 function asRunnerEventMarker(rawEvent: unknown): Record<string, unknown> | null {

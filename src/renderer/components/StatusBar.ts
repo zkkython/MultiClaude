@@ -8,7 +8,6 @@ export function createStatusBar(onNextWaiting: () => void): HTMLElement {
     const state = getState();
     const activeTab = state.tabs.find(t => t.id === state.activeTabId);
     const counts = getRuntimeStateCounts();
-    const metrics = state.protocolMetrics;
 
     let statusText = '';
     if (activeTab) {
@@ -21,7 +20,6 @@ export function createStatusBar(onNextWaiting: () => void): HTMLElement {
     bar.innerHTML = `
       <div class="status-left">${statusText}</div>
       <div class="status-right">
-        ${metrics ? `<span class="status-metric" title="Protocol Metrics">PR:${formatPct(metrics.rates.interactionRecall)} FP:${formatPct(metrics.rates.falsePositiveRate)} SM:${formatPct(metrics.rates.stateMismatchRate)} FR:${formatPct(metrics.rates.fallbackRecoveryRate)}</span><span class="status-sep">|</span>` : ''}
         <span class="status-waiting ${counts.waiting > 0 ? 'active' : ''}" title="Go to next waiting terminal">W:${counts.waiting}</span>
         <span class="status-sep">|</span>
         <span>R:${counts.running}</span>
@@ -43,10 +41,4 @@ export function createStatusBar(onNextWaiting: () => void): HTMLElement {
   subscribe(render);
   render();
   return bar;
-}
-
-function formatPct(value: number | null): string {
-  if (value === null || Number.isNaN(value)) return '-';
-  if (Number.isInteger(value)) return `${value}%`;
-  return `${value.toFixed(1)}%`;
 }

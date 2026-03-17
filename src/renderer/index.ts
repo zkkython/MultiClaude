@@ -3,7 +3,7 @@ import {
   addTab, removeTab, updateTabStatus, setActiveTab,
   nextTab, prevTab, goToTab,
   getGroupTabIds, autoGroupByConfig,
-  findNextWaitingTabId, setProtocolMetrics, setTabRuntimeState, removeTabRuntimeState,
+  findNextWaitingTabId, setProtocolMetrics, setTabRuntimeState, removeTabRuntimeState, expandGroupForTab,
 } from './state/store.js';
 import { createSidebar, type SidebarAction } from './components/Sidebar.js';
 import { showConfigEditor, type ConfigEditorResult } from './components/ConfigEditor.js';
@@ -12,14 +12,13 @@ import {
   createTerminalContainer, createTerminalView, writeToTerminal,
   showTerminal, destroyTerminal, fitAllTerminals, clearTerminal,
   selectAllInTerminal, copyFromTerminal, pasteToTerminal, setTerminalFontSize,
-  getTerminalIdForTab, setTerminalInputEnabled,
+  getTerminalIdForTab,
 } from './components/TerminalView.js';
 import { createWelcomeScreen } from './components/WelcomeScreen.js';
 import { createStatusBar } from './components/StatusBar.js';
 import type {
   ModelConfig,
   RunnerEvent,
-  RunnerUserInputType,
   TerminalRuntimeState,
   TerminalTab,
   TabGroup,
@@ -32,26 +31,9 @@ const terminalToTab = new Map<string, string>();
 const tabToRunnerSession = new Map<string, string>();
 const runnerSessionToTab = new Map<string, string>();
 const runnerTransportByTab = new Map<string, string>();
-const pendingRunnerInputByTab = new Map<string, PendingRunnerInput>();
 const runnerLastEventByTab = new Map<string, string>();
 let isRefreshingConfigs = false;
 let metricsPollTimer: ReturnType<typeof setInterval> | null = null;
-let protocolInputBar: HTMLElement | null = null;
-let protocolInputPromptEl: HTMLElement | null = null;
-let protocolInputFieldEl: HTMLInputElement | null = null;
-let protocolInputHintEl: HTMLElement | null = null;
-let protocolApproveBtnEl: HTMLButtonElement | null = null;
-let protocolRejectBtnEl: HTMLButtonElement | null = null;
-let protocolSendBtnEl: HTMLButtonElement | null = null;
-let protocolInterruptBtnEl: HTMLButtonElement | null = null;
-let protocolStopBtnEl: HTMLButtonElement | null = null;
-
-interface PendingRunnerInput {
-  sessionId: string;
-  requestId: string;
-  inputKind: 'text' | 'approval';
-  prompt: string;
-}
 
 async function init() {
   // Load settings
@@ -82,7 +64,6 @@ async function init() {
 
   const tabBar = createTerminalTabs(handleTabSelect, handleTabClose, handleCloseGroupTabs, handleGroupsChanged);
   const termContainer = createTerminalContainer();
-  protocolInputBar = createProtocolInputBar();
   const welcomeScreen = createWelcomeScreen();
   const statusBar = createStatusBar(() => {
     jumpToNextWaiting();
@@ -90,9 +71,6 @@ async function init() {
 
   mainArea.appendChild(tabBar);
   mainArea.appendChild(termContainer);
-  if (protocolInputBar) {
-    mainArea.appendChild(protocolInputBar);
-  }
   mainArea.appendChild(welcomeScreen);
 
   appEl.appendChild(sidebar);
@@ -108,7 +86,6 @@ async function init() {
     sidebar.style.display = state.sidebarVisible ? 'flex' : 'none';
     welcomeScreen.style.display = (!hasConfigs && !hasTabs) ? 'flex' : 'none';
     termContainer.style.display = hasTabs ? 'flex' : 'none';
-    renderProtocolInputBar();
   });
 
   // Welcome screen create button
@@ -129,13 +106,6 @@ async function init() {
     const tabId = terminalToTab.get(terminalId);
     if (tabId) {
       updateTabStatus(tabId, 'exited');
-      setTabRuntimeState(tabId, {
-        state: 'exited',
-        confidence: 'high',
-        reason: `terminal exited (${code})`,
-        source: 'process',
-        updatedAt: Date.now(),
-      });
       // Notification if not active tab
       const state = getState();
       if (state.activeTabId !== tabId) {
@@ -152,9 +122,6 @@ async function init() {
   window.multiclaude.terminal.onState((terminalId, runtimeState) => {
     const tabId = terminalToTab.get(terminalId);
     if (!tabId) return;
-    if (pendingRunnerInputByTab.has(tabId) && runtimeState.state !== 'waiting') {
-      return;
-    }
     setTabRuntimeState(tabId, runtimeState);
   });
 
@@ -196,9 +163,11 @@ function handleSidebarAction(action: SidebarAction) {
       setState({ selectedConfigId: action.configId });
       break;
     case 'new-terminal':
+      setState({ selectedConfigId: action.configId });
       spawnTerminal(action.configId);
       break;
     case 'system-terminal':
+      setState({ selectedConfigId: action.configId });
       openSystemTerminal(action.configId);
       break;
     case 'edit-config': {
@@ -244,13 +213,6 @@ async function spawnTerminal(configId: string) {
     };
 
     addTab(tab);
-    setTabRuntimeState(tabId, {
-      state: 'running',
-      confidence: 'medium',
-      reason: 'terminal spawned',
-      source: 'process',
-      updatedAt: Date.now(),
-    });
 
     // Create terminal view
     const termContainer = document.querySelector('.terminal-container')!;
@@ -288,7 +250,6 @@ function handleTabClose(tabId: string) {
     tabToTerminal.delete(tabId);
   }
   removeTabRuntimeState(tabId);
-  pendingRunnerInputByTab.delete(tabId);
   runnerLastEventByTab.delete(tabId);
   runnerTransportByTab.delete(tabId);
   destroyTerminal(tabId);
@@ -318,7 +279,6 @@ async function endRunnerSessionForTab(tabId: string): Promise<void> {
   tabToRunnerSession.delete(tabId);
   runnerSessionToTab.delete(sessionId);
   runnerTransportByTab.delete(tabId);
-  pendingRunnerInputByTab.delete(tabId);
   try {
     await window.multiclaude.protocol.endSession(sessionId);
   } catch (err) {
@@ -331,41 +291,8 @@ function onRunnerEvent(event: RunnerEvent): void {
   if (!tabId) return;
 
   runnerLastEventByTab.set(tabId, event.type);
-  if (event.type === 'input.requested') {
-    pendingRunnerInputByTab.set(tabId, {
-      sessionId: event.sessionId,
-      requestId: String(event.requestId ?? ''),
-      inputKind: event.inputKind === 'text' ? 'text' : 'approval',
-      prompt: String(event.prompt ?? 'Input requested'),
-    });
-    setTabRuntimeState(tabId, {
-      state: 'waiting',
-      confidence: 'high',
-      reason: 'protocol input requested',
-      source: 'explicit',
-      updatedAt: Date.now(),
-    });
-    setTerminalInputEnabled(tabId, false);
-  } else if (event.type === 'status.changed') {
-    pendingRunnerInputByTab.delete(tabId);
-    if (event.to === 'streaming') {
-      setTerminalInputEnabled(tabId, true);
-      setTabRuntimeState(tabId, {
-        state: 'running',
-        confidence: 'high',
-        reason: 'protocol session resumed streaming',
-        source: 'explicit',
-        updatedAt: Date.now(),
-      });
-    } else if (event.to === 'fallback_pty') {
-      setTerminalInputEnabled(tabId, true);
-      setTabRuntimeState(tabId, {
-        state: 'running',
-        confidence: 'high',
-        reason: 'protocol failed, fallback to PTY',
-        source: 'explicit',
-        updatedAt: Date.now(),
-      });
+  if (event.type === 'status.changed') {
+    if (event.to === 'fallback_pty') {
       const tab = getState().tabs.find(t => t.id === tabId);
       if (tab) {
         new Notification(tab.configName, {
@@ -373,152 +300,8 @@ function onRunnerEvent(event: RunnerEvent): void {
         });
       }
     }
-  } else if (event.type === 'session.failed' || event.type === 'session.completed') {
-    pendingRunnerInputByTab.delete(tabId);
-    setTerminalInputEnabled(tabId, true);
   }
-
-  renderProtocolInputBar();
   void refreshProtocolMetrics();
-}
-
-function createProtocolInputBar(): HTMLElement {
-  const wrap = document.createElement('div');
-  wrap.className = 'protocol-input-bar';
-  wrap.innerHTML = `
-    <div class="protocol-input-prompt"></div>
-    <div class="protocol-input-row">
-      <input class="protocol-input-field" type="text" placeholder="Type your response and press Enter..." />
-      <button class="action-btn protocol-input-send">Send</button>
-      <button class="action-btn protocol-input-approve">Approve</button>
-      <button class="action-btn action-btn-danger protocol-input-reject">Reject</button>
-      <button class="action-btn protocol-input-interrupt">Interrupt</button>
-      <button class="action-btn action-btn-danger protocol-input-stop">Stop</button>
-    </div>
-    <div class="protocol-input-hint"></div>
-  `;
-
-  protocolInputPromptEl = wrap.querySelector('.protocol-input-prompt') as HTMLElement | null;
-  protocolInputFieldEl = wrap.querySelector('.protocol-input-field') as HTMLInputElement | null;
-  protocolInputHintEl = wrap.querySelector('.protocol-input-hint') as HTMLElement | null;
-  protocolSendBtnEl = wrap.querySelector('.protocol-input-send') as HTMLButtonElement | null;
-  protocolApproveBtnEl = wrap.querySelector('.protocol-input-approve') as HTMLButtonElement | null;
-  protocolRejectBtnEl = wrap.querySelector('.protocol-input-reject') as HTMLButtonElement | null;
-  protocolInterruptBtnEl = wrap.querySelector('.protocol-input-interrupt') as HTMLButtonElement | null;
-  protocolStopBtnEl = wrap.querySelector('.protocol-input-stop') as HTMLButtonElement | null;
-
-  protocolSendBtnEl?.addEventListener('click', () => {
-    void submitRunnerInput('user_response');
-  });
-  protocolApproveBtnEl?.addEventListener('click', () => {
-    void submitRunnerInput('user_approve');
-  });
-  protocolRejectBtnEl?.addEventListener('click', () => {
-    void submitRunnerInput('user_reject');
-  });
-  protocolInputFieldEl?.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      void submitRunnerInput('user_response');
-    }
-  });
-  protocolInterruptBtnEl?.addEventListener('click', () => {
-    void interruptRunnerSession();
-  });
-  protocolStopBtnEl?.addEventListener('click', () => {
-    void stopRunnerSession();
-  });
-
-  wrap.style.display = 'none';
-  return wrap;
-}
-
-function renderProtocolInputBar(): void {
-  if (!protocolInputBar) return;
-  const activeTabId = getState().activeTabId;
-  if (!activeTabId) {
-    protocolInputBar.style.display = 'none';
-    return;
-  }
-
-  const pending = pendingRunnerInputByTab.get(activeTabId);
-  if (!pending) {
-    protocolInputBar.style.display = 'none';
-    return;
-  }
-
-  protocolInputBar.style.display = 'flex';
-  if (protocolInputPromptEl) {
-    protocolInputPromptEl.textContent = pending.prompt || 'Input requested';
-  }
-  const isText = pending.inputKind === 'text';
-  if (protocolInputFieldEl) {
-    protocolInputFieldEl.style.display = isText ? 'block' : 'none';
-  }
-  if (protocolSendBtnEl) {
-    protocolSendBtnEl.style.display = isText ? 'inline-flex' : 'none';
-  }
-  if (protocolApproveBtnEl) {
-    protocolApproveBtnEl.style.display = isText ? 'none' : 'inline-flex';
-  }
-  if (protocolRejectBtnEl) {
-    protocolRejectBtnEl.style.display = isText ? 'none' : 'inline-flex';
-  }
-  if (protocolInputHintEl) {
-    const eventType = runnerLastEventByTab.get(activeTabId) || 'input.requested';
-    const transport = runnerTransportByTab.get(activeTabId) || 'pty';
-    protocolInputHintEl.textContent = `Session ${pending.sessionId} · request ${pending.requestId} · ${eventType} · transport:${transport}`;
-  }
-}
-
-async function submitRunnerInput(type: RunnerUserInputType): Promise<void> {
-  const activeTabId = getState().activeTabId;
-  if (!activeTabId) return;
-  const pending = pendingRunnerInputByTab.get(activeTabId);
-  if (!pending) return;
-
-  const text = (protocolInputFieldEl?.value || '').trim();
-  if (pending.inputKind === 'text' && type === 'user_response' && text.length === 0) {
-    return;
-  }
-
-  const accepted = await window.multiclaude.protocol.submitInput({
-    sessionId: pending.sessionId,
-    requestId: pending.requestId,
-    type,
-    text: type === 'user_response' ? text : undefined,
-  });
-  if (!accepted) return;
-
-  pendingRunnerInputByTab.delete(activeTabId);
-  if (protocolInputFieldEl) {
-    protocolInputFieldEl.value = '';
-  }
-  setTabRuntimeState(activeTabId, {
-    state: 'running',
-    confidence: 'high',
-    reason: 'protocol input submitted',
-    source: 'explicit',
-    updatedAt: Date.now(),
-  });
-  renderProtocolInputBar();
-  void refreshProtocolMetrics();
-}
-
-async function interruptRunnerSession(): Promise<void> {
-  const activeTabId = getState().activeTabId;
-  if (!activeTabId) return;
-  const pending = pendingRunnerInputByTab.get(activeTabId);
-  if (!pending) return;
-  await window.multiclaude.protocol.interruptSession(pending.sessionId);
-}
-
-async function stopRunnerSession(): Promise<void> {
-  const activeTabId = getState().activeTabId;
-  if (!activeTabId) return;
-  const pending = pendingRunnerInputByTab.get(activeTabId);
-  if (!pending) return;
-  await window.multiclaude.protocol.stopSession(pending.sessionId);
 }
 
 async function refreshProtocolMetrics(): Promise<void> {
@@ -783,6 +566,7 @@ function jumpToNextWaiting() {
   const state = getState();
   const nextWaitingTabId = findNextWaitingTabId(state.activeTabId);
   if (!nextWaitingTabId) return;
+  expandGroupForTab(nextWaitingTabId);
   setActiveTab(nextWaitingTabId);
   showTerminal(nextWaitingTabId);
 }
@@ -841,9 +625,15 @@ function formatError(err: unknown): string {
 }
 
 // Subscribe to active tab changes to show correct terminal
+let lastFocusedTabId: string | null = null;
 subscribe(() => {
   const state = getState();
-  if (state.activeTabId) {
+  if (!state.activeTabId) {
+    lastFocusedTabId = null;
+    return;
+  }
+  if (state.activeTabId !== lastFocusedTabId) {
+    lastFocusedTabId = state.activeTabId;
     showTerminal(state.activeTabId);
   }
 });

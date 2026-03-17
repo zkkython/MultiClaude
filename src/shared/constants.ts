@@ -28,6 +28,8 @@ export const IPC = {
   RUNNER_METRICS_GET: 'runner:metrics:get',
   RUNNER_METRICS_RESET: 'runner:metrics:reset',
   RUNNER_CONNECTIVITY_TEST: 'runner:connectivity:test',
+  RUNNER_CLAUDE_HOOKS_STATUS_GET: 'runner:claude-hooks:status:get',
+  RUNNER_CLAUDE_HOOKS_INSTALL: 'runner:claude-hooks:install',
 
   SYSTEM_TERMINAL_OPEN: 'system-terminal:open',
 

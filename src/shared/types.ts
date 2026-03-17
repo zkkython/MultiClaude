@@ -171,6 +171,15 @@ export interface ProtocolConnectivityCheckResult {
   }>;
 }
 
+export interface ClaudeHooksStatus {
+  installed: boolean;
+  settingsPath: string;
+  hookScriptPath: string;
+  command: string;
+  missingEvents: string[];
+  error?: string;
+}
+
 // Preload API exposed to renderer
 export interface MultiClaudeAPI {
   config: {
@@ -219,6 +228,8 @@ export interface MultiClaudeAPI {
     getMetrics(): Promise<RunnerMetricsSnapshot>;
     resetMetrics(): Promise<void>;
     testConnectivity(input: ProtocolConnectivityCheckInput): Promise<ProtocolConnectivityCheckResult>;
+    getClaudeHooksStatus(): Promise<ClaudeHooksStatus>;
+    installClaudeHooks(): Promise<ClaudeHooksStatus>;
   };
 }
 

@@ -34,6 +34,7 @@ export function createTerminalTabs(
   // A small movement threshold distinguishes "click to select" from "drag to scroll".
   let dragScrolling = false;
   let wasDragged = false;
+  let dragScrollActive = false;
   let dragStartX = 0;
   let dragScrollLeft = 0;
   let draggedTabId: string | null = null;
@@ -49,6 +50,7 @@ export function createTerminalTabs(
     if (target.closest('.tab') || target.closest('.tab-group-header')) return;
     dragScrolling = true;
     wasDragged = false;
+    dragScrollActive = false;
     dragStartX = e.pageX;
     dragScrollLeft = scrollContainer.scrollLeft;
   });
@@ -56,17 +58,21 @@ export function createTerminalTabs(
   const onDocumentMouseMove = (e: MouseEvent) => {
     if (!dragScrolling) return;
     const dx = e.pageX - dragStartX;
-    if (Math.abs(dx) > 3) {
+    if (!dragScrollActive && Math.abs(dx) > 8) {
+      dragScrollActive = true;
+    }
+    if (dragScrollActive) {
       wasDragged = true;
       scrollContainer.style.cursor = 'grabbing';
       e.preventDefault();
+      scrollContainer.scrollLeft = dragScrollLeft - dx;
     }
-    scrollContainer.scrollLeft = dragScrollLeft - dx;
   };
 
   const onDocumentMouseUp = () => {
     if (dragScrolling) {
       dragScrolling = false;
+      dragScrollActive = false;
       scrollContainer.style.cursor = '';
     }
   };
@@ -104,6 +110,10 @@ export function createTerminalTabs(
   let lastNameClickTabId: string | null = null;
   let lastGroupNameClickTime = 0;
   let lastGroupNameClickId: string | null = null;
+  let prevTabsRef: TerminalTab[] | null = null;
+  let prevGroupsRef: TabGroup[] | null = null;
+  let prevActiveTabId: string | null = null;
+  let prevRuntimeStatesRef: unknown = null;
 
   // Close any open context menu
   function closeContextMenu() {
@@ -128,8 +138,9 @@ export function createTerminalTabs(
     const target = e.target as HTMLElement;
 
     // Tab name double-click for rename
-    if (target.classList.contains('tab-name')) {
-      const tabEl = target.closest('.tab') as HTMLElement;
+    const tabNameEl = target.closest('.tab-name') as HTMLElement | null;
+    if (tabNameEl) {
+      const tabEl = tabNameEl.closest('.tab') as HTMLElement;
       if (!tabEl) return;
       const tabId = tabEl.dataset.tabId!;
 
@@ -146,8 +157,9 @@ export function createTerminalTabs(
     }
 
     // Group name double-click for rename
-    if (target.classList.contains('tab-group-name')) {
-      const headerEl = target.closest('.tab-group-header') as HTMLElement;
+    const groupNameEl = target.closest('.tab-group-name') as HTMLElement | null;
+    if (groupNameEl) {
+      const headerEl = groupNameEl.closest('.tab-group-header') as HTMLElement;
       if (!headerEl) return;
       const groupId = headerEl.dataset.groupId!;
 
@@ -178,17 +190,29 @@ export function createTerminalTabs(
     // Save editing state before innerHTML destroys it
     const wasEditingTabId = editingTabId;
     let savedTabValue = '';
+    let savedTabSelectionStart: number | null = null;
+    let savedTabSelectionEnd: number | null = null;
     const wasEditingGroupId = editingGroupId;
     let savedGroupValue = '';
+    let savedGroupSelectionStart: number | null = null;
+    let savedGroupSelectionEnd: number | null = null;
 
     if (wasEditingTabId) {
       const input = scrollContainer.querySelector('.tab-name-input') as HTMLInputElement | null;
-      if (input) savedTabValue = input.value;
+      if (input) {
+        savedTabValue = input.value;
+        savedTabSelectionStart = input.selectionStart;
+        savedTabSelectionEnd = input.selectionEnd;
+      }
       editingTabId = null;
     }
     if (wasEditingGroupId) {
       const input = scrollContainer.querySelector('.tab-group-name-input') as HTMLInputElement | null;
-      if (input) savedGroupValue = input.value;
+      if (input) {
+        savedGroupValue = input.value;
+        savedGroupSelectionStart = input.selectionStart;
+        savedGroupSelectionEnd = input.selectionEnd;
+      }
       editingGroupId = null;
     }
 
@@ -235,7 +259,6 @@ export function createTerminalTabs(
       tabEl.addEventListener('click', (e) => {
         if ((e.target as HTMLElement).classList.contains('tab-close')) return;
         if ((e.target as HTMLElement).classList.contains('tab-name-input')) return;
-        if (draggedTabId) return;
         onTabSelect(tabId);
       });
       tabEl.querySelector('.tab-close')?.addEventListener('click', (e) => {
@@ -303,12 +326,24 @@ export function createTerminalTabs(
     // Restore tab editing
     if (wasEditingTabId && tabs.find(t => t.id === wasEditingTabId)) {
       const tabEl = scrollContainer.querySelector(`.tab[data-tab-id="${wasEditingTabId}"]`) as HTMLElement | null;
-      if (tabEl) setupTabInput(wasEditingTabId, tabEl, savedTabValue);
+      if (tabEl) {
+        setupTabInput(wasEditingTabId, tabEl, savedTabValue, {
+          selectAll: false,
+          selectionStart: savedTabSelectionStart,
+          selectionEnd: savedTabSelectionEnd,
+        });
+      }
     }
     // Restore group editing
     if (wasEditingGroupId && groups.find(g => g.id === wasEditingGroupId)) {
       const headerEl = scrollContainer.querySelector(`.tab-group-header[data-group-id="${wasEditingGroupId}"]`) as HTMLElement | null;
-      if (headerEl) setupGroupInput(wasEditingGroupId, headerEl, savedGroupValue);
+      if (headerEl) {
+        setupGroupInput(wasEditingGroupId, headerEl, savedGroupValue, {
+          selectAll: false,
+          selectionStart: savedGroupSelectionStart,
+          selectionEnd: savedGroupSelectionEnd,
+        });
+      }
     }
   }
 
@@ -317,10 +352,15 @@ export function createTerminalTabs(
   function startEditingTab(tabId: string, tabEl: HTMLElement) {
     const tab = getState().tabs.find(t => t.id === tabId);
     if (!tab) return;
-    setupTabInput(tabId, tabEl, tab.customName || tab.configName);
+    setupTabInput(tabId, tabEl, tab.customName || tab.configName, { selectAll: true });
   }
 
-  function setupTabInput(tabId: string, tabEl: HTMLElement, value: string) {
+  function setupTabInput(
+    tabId: string,
+    tabEl: HTMLElement,
+    value: string,
+    options?: { selectAll?: boolean; selectionStart?: number | null; selectionEnd?: number | null }
+  ) {
     const nameEl = tabEl.querySelector('.tab-name') as HTMLElement | null;
     if (!nameEl) return;
     const tab = getState().tabs.find(t => t.id === tabId);
@@ -333,11 +373,21 @@ export function createTerminalTabs(
     input.value = value;
     nameEl.replaceWith(input);
     input.focus();
-    input.select();
+    if (options?.selectAll) {
+      input.select();
+    } else if (typeof options?.selectionStart === 'number' && typeof options?.selectionEnd === 'number') {
+      const len = input.value.length;
+      const start = Math.max(0, Math.min(options.selectionStart, len));
+      const end = Math.max(start, Math.min(options.selectionEnd, len));
+      input.setSelectionRange(start, end);
+    }
 
     let committed = false;
+    let isComposing = false;
+    let suppressEnterUntil = 0;
     function commit() {
       if (committed) return;
+      if (isComposing) return;
       committed = true;
       editingTabId = null;
       const newName = input.value.trim();
@@ -354,11 +404,25 @@ export function createTerminalTabs(
       render();
     }
     input.addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).isComposing || isComposing) return;
+      if (Date.now() < suppressEnterUntil && e.key === 'Enter') {
+        e.preventDefault();
+        return;
+      }
       if (e.key === 'Enter') { e.preventDefault(); commit(); }
       else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
     });
+    input.addEventListener('compositionstart', () => {
+      isComposing = true;
+    });
+    input.addEventListener('compositionend', () => {
+      isComposing = false;
+      suppressEnterUntil = Date.now() + 350;
+    });
     input.addEventListener('blur', () => {
-      if (editingTabId === tabId) commit();
+      // Avoid accidental IME/preedit commit due focus changes.
+      // Rename now commits only on Enter.
+      if (editingTabId === tabId) cancel();
     });
   }
 
@@ -367,10 +431,15 @@ export function createTerminalTabs(
   function startEditingGroup(groupId: string, headerEl: HTMLElement) {
     const group = getState().groups.find(g => g.id === groupId);
     if (!group) return;
-    setupGroupInput(groupId, headerEl, group.name);
+    setupGroupInput(groupId, headerEl, group.name, { selectAll: true });
   }
 
-  function setupGroupInput(groupId: string, headerEl: HTMLElement, value: string) {
+  function setupGroupInput(
+    groupId: string,
+    headerEl: HTMLElement,
+    value: string,
+    options?: { selectAll?: boolean; selectionStart?: number | null; selectionEnd?: number | null }
+  ) {
     const nameEl = headerEl.querySelector('.tab-group-name') as HTMLElement | null;
     if (!nameEl) return;
 
@@ -381,11 +450,21 @@ export function createTerminalTabs(
     input.value = value;
     nameEl.replaceWith(input);
     input.focus();
-    input.select();
+    if (options?.selectAll) {
+      input.select();
+    } else if (typeof options?.selectionStart === 'number' && typeof options?.selectionEnd === 'number') {
+      const len = input.value.length;
+      const start = Math.max(0, Math.min(options.selectionStart, len));
+      const end = Math.max(start, Math.min(options.selectionEnd, len));
+      input.setSelectionRange(start, end);
+    }
 
     let committed = false;
+    let isComposing = false;
+    let suppressEnterUntil = 0;
     function commit() {
       if (committed) return;
+      if (isComposing) return;
       committed = true;
       editingGroupId = null;
       const newName = input.value.trim();
@@ -403,11 +482,25 @@ export function createTerminalTabs(
       render();
     }
     input.addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).isComposing || isComposing) return;
+      if (Date.now() < suppressEnterUntil && e.key === 'Enter') {
+        e.preventDefault();
+        return;
+      }
       if (e.key === 'Enter') { e.preventDefault(); commit(); }
       else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
     });
+    input.addEventListener('compositionstart', () => {
+      isComposing = true;
+    });
+    input.addEventListener('compositionend', () => {
+      isComposing = false;
+      suppressEnterUntil = Date.now() + 350;
+    });
     input.addEventListener('blur', () => {
-      if (editingGroupId === groupId) commit();
+      // Avoid accidental IME/preedit commit due focus changes.
+      // Rename now commits only on Enter.
+      if (editingGroupId === groupId) cancel();
     });
   }
 
@@ -424,6 +517,24 @@ export function createTerminalTabs(
     menu.className = 'tab-context-menu';
     menu.style.left = `${e.clientX}px`;
     menu.style.top = `${e.clientY}px`;
+
+    // Rename Tab
+    const renameItem = document.createElement('div');
+    renameItem.className = 'tab-context-menu-item';
+    renameItem.textContent = 'Rename Tab';
+    renameItem.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      closeContextMenu();
+      requestAnimationFrame(() => {
+        const tabEl = scrollContainer.querySelector(`.tab[data-tab-id="${tabId}"]`) as HTMLElement | null;
+        if (tabEl) startEditingTab(tabId, tabEl);
+      });
+    });
+    menu.appendChild(renameItem);
+
+    const sepAfterRename = document.createElement('div');
+    sepAfterRename.className = 'tab-context-menu-separator';
+    menu.appendChild(sepAfterRename);
 
     // "Move to Group" with submenu
     const moveItem = document.createElement('div');
@@ -590,7 +701,34 @@ export function createTerminalTabs(
     });
   }
 
-  subscribe(render);
+  subscribe(() => {
+    const s = getState();
+    const tabsChanged = prevTabsRef !== s.tabs;
+    const groupsChanged = prevGroupsRef !== s.groups;
+    const activeChanged = prevActiveTabId !== s.activeTabId;
+    const runtimeChanged = prevRuntimeStatesRef !== s.runtimeStatesByTabId;
+    const relevantChanged = tabsChanged || groupsChanged || activeChanged || runtimeChanged;
+
+    prevTabsRef = s.tabs;
+    prevGroupsRef = s.groups;
+    prevActiveTabId = s.activeTabId;
+    prevRuntimeStatesRef = s.runtimeStatesByTabId;
+
+    if (!relevantChanged) {
+      return;
+    }
+
+    // During inline rename, ignore runtime-only refreshes to avoid IME composition break.
+    if ((editingTabId || editingGroupId) && !tabsChanged && !groupsChanged && !activeChanged && runtimeChanged) {
+      return;
+    }
+    render();
+  });
+  const initial = getState();
+  prevTabsRef = initial.tabs;
+  prevGroupsRef = initial.groups;
+  prevActiveTabId = initial.activeTabId;
+  prevRuntimeStatesRef = initial.runtimeStatesByTabId;
   render();
   return tabBar;
 }
@@ -613,7 +751,7 @@ function renderTab(tab: TerminalTab, isActive: boolean): string {
   const statusClass = effectiveState === 'exited' ? 'tab-exited' : '';
   const waitingClass = effectiveState === 'waiting' ? 'tab-waiting' : '';
   const displayName = tab.customName || tab.configName;
-  const waitingBadge = effectiveState === 'waiting' ? '<span class="tab-waiting-badge">● waiting</span>' : '';
+  const waitingBadge = effectiveState === 'waiting' ? '<span class="tab-waiting-badge">waiting</span>' : '';
   const exitedBadge = tab.status === 'exited' ? '<span class="tab-status-badge">exited</span>' : '';
   return `
     <div class="tab ${isActive ? 'active' : ''} ${statusClass} ${waitingClass}" data-tab-id="${tab.id}" data-runtime-state="${effectiveState}" draggable="true">

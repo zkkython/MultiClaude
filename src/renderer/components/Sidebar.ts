@@ -29,6 +29,10 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
   const content = document.createElement('div');
   content.className = 'sidebar-content';
   sidebar.appendChild(content);
+  let prevConfigsRef: ModelConfig[] | null = null;
+  let prevSelectedConfigId: string | null = null;
+  let prevSearchQuery = '';
+  let prevSidebarWidth = -1;
 
   function render() {
     const state = getState();
@@ -129,12 +133,30 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
     }
   });
 
-  subscribe(render);
+  subscribe(() => {
+    const state = getState();
+    const shouldRender = prevConfigsRef !== state.configs
+      || prevSelectedConfigId !== state.selectedConfigId
+      || prevSearchQuery !== state.searchQuery;
+    if (prevSidebarWidth !== state.sidebarWidth) {
+      sidebar.style.width = `${state.sidebarWidth}px`;
+      prevSidebarWidth = state.sidebarWidth;
+    }
+    if (!shouldRender) return;
+    prevConfigsRef = state.configs;
+    prevSelectedConfigId = state.selectedConfigId;
+    prevSearchQuery = state.searchQuery;
+    render();
+  });
   render();
 
   // Apply initial width
   const state = getState();
   sidebar.style.width = `${state.sidebarWidth}px`;
+  prevConfigsRef = state.configs;
+  prevSelectedConfigId = state.selectedConfigId;
+  prevSearchQuery = state.searchQuery;
+  prevSidebarWidth = state.sidebarWidth;
 
   return sidebar;
 }
