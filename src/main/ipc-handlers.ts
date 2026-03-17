@@ -146,7 +146,7 @@ export function registerIpcHandlers(): void {
       }
     }
     await injectRunnerSidechannelEnv(terminalId, env);
-    agentStateEngine.registerTerminal(terminalId, config.provider, resolveWaitingDetectionMode(config));
+    agentStateEngine.registerTerminal(terminalId);
 
     spawnPty(
       terminalId,
@@ -726,9 +726,14 @@ async function resolveClaudeHookIntegrationInfo(): Promise<{
   scriptExists: boolean;
 }> {
   const settingsPath = path.resolve(os.homedir(), '.claude/settings.json');
+  const packagedUnpackedHookPath = path.resolve(process.resourcesPath, 'app.asar.unpacked/dist/hooks/claude-runner-sidechannel.js');
+  const packagedAsarHookPath = path.resolve(process.resourcesPath, 'app.asar/dist/hooks/claude-runner-sidechannel.js');
   const candidates = [
+    packagedUnpackedHookPath,
+    packagedAsarHookPath,
     path.resolve(process.cwd(), 'scripts/hooks/claude-runner-sidechannel.js'),
     path.resolve(__dirname, '../../scripts/hooks/claude-runner-sidechannel.js'),
+    path.resolve(__dirname, '../hooks/claude-runner-sidechannel.js'),
   ];
   let hookScriptPath = candidates[0];
   let scriptExists = false;
@@ -745,9 +750,13 @@ async function resolveClaudeHookIntegrationInfo(): Promise<{
   return {
     hookScriptPath,
     settingsPath,
-    command: `node ${hookScriptPath}`,
+    command: `node ${quoteShellArg(hookScriptPath)}`,
     scriptExists,
   };
+}
+
+function quoteShellArg(input: string): string {
+  return `'${input.replace(/'/g, `'\\''`)}'`;
 }
 
 async function readClaudeSettingsObject(settingsPath: string): Promise<Record<string, unknown>> {
@@ -936,19 +945,6 @@ function inferHttpSseDefaults(config: ModelConfig): {
 
 function trimTrailingSlash(url: string): string {
   return url.replace(/\/+$/, '');
-}
-
-function resolveWaitingDetectionMode(config: ModelConfig): 'heuristic' | 'strict' {
-  const mode = (config.customEnvVars['MC_WAITING_DETECTION_MODE'] || '').trim().toLowerCase();
-  if (mode === 'heuristic' || mode === 'strict') {
-    return mode;
-  }
-  // Protocol runner sessions should rely on structured events for accuracy.
-  const protocolTransport = (config.customEnvVars['MC_PROTOCOL_TRANSPORT'] || '').trim();
-  if (protocolTransport) {
-    return 'strict';
-  }
-  return 'heuristic';
 }
 
 function parsePositiveInt(value: string | undefined): number | undefined {

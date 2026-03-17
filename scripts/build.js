@@ -15,6 +15,7 @@ const commonOptions = {
 async function build() {
   const mainDistDir = path.resolve(__dirname, '../dist/main');
   const preloadDistDir = path.resolve(__dirname, '../dist/preload');
+  const hooksDistDir = path.resolve(__dirname, '../dist/hooks');
 
   // Patch Electron.app display name to "MultiClaude" for dev mode
   patchElectronAppName();
@@ -76,6 +77,13 @@ async function build() {
   if (fs.existsSync(xtermCssPath)) {
     fs.copyFileSync(xtermCssPath, path.join(rendererDistDir, 'styles', 'xterm.css'));
   }
+
+  // Copy Claude hook bridge script for packaged/runtime hook installation.
+  fs.mkdirSync(hooksDistDir, { recursive: true });
+  fs.copyFileSync(
+    path.resolve(__dirname, '../scripts/hooks/claude-runner-sidechannel.js'),
+    path.join(hooksDistDir, 'claude-runner-sidechannel.js')
+  );
 
   if (isWatch) {
     await mainContext.watch();

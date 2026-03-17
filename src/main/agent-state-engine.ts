@@ -1,8 +1,6 @@
-import type { ConfigProvider, RuntimeState, RuntimeStateConfidence, RuntimeStateSource, TerminalRuntimeState } from '../shared/types.js';
+import type { RuntimeState, RuntimeStateConfidence, RuntimeStateSource, TerminalRuntimeState } from '../shared/types.js';
 
 interface AgentStateSession {
-  provider: ConfigProvider;
-  detectionMode: WaitingDetectionMode;
   state: RuntimeState;
   confidence: RuntimeStateConfidence;
   reason: string;
@@ -11,10 +9,7 @@ interface AgentStateSession {
   lastInputAt: number;
   lastStateAt: number;
   waitingCooldownUntil: number;
-  lineBuffer: string[];
 }
-
-type WaitingDetectionMode = 'heuristic' | 'strict';
 
 interface RuntimeStatePayload extends TerminalRuntimeState {
   terminalId: string;
@@ -27,43 +22,13 @@ interface DetectionResult {
   source: RuntimeStateSource;
 }
 
-const WAITING_CONFIRM_MS = 900;
 const IDLE_THRESHOLD_MS = 15_000;
 const STATE_DEBOUNCE_MS = 300;
 const WAITING_COOLDOWN_MS = 3_000;
-const MAX_LINE_BUFFER = 12;
-const MAX_LINE_LENGTH = 240;
 
 const EXPLICIT_MARKER_RE = /__MC_STATE__:(waiting|running|idle|done|exited)/i;
 const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
 const CONTROL_CHARS_RE = /[\u0000-\u0008\u000b-\u001f\u007f]/g;
-
-const HIGH_PATTERNS: RegExp[] = [
-  /\bdo\s+you\s+want\s+to\b/i,
-  /\bsave\s+file\s+to\s+continue\b/i,
-  /\bpress\s+(?:enter|return)\s+to\s+continue\b/i,
-  /\bapproval\s+required\b/i,
-  /\bauthentication\s+required\b/i,
-  /\b(?:allow|approve)\s*\/\s*(?:deny|reject)\b/i,
-  /\bcontinue\?\s*\(?\s*y\/n\s*\)?/i,
-  /\bconfirm\?\s*\(?\s*y\/n\s*\)?/i,
-  /\bselect\s+(?:an?\s+)?option\b/i,
-  /\bquestion\s+\d+\/\d+.*\bunanswered\b/i,
-];
-
-const MEDIUM_PATTERNS: RegExp[] = [
-  /\bconfirm\b/i,
-  /\bchoose\b/i,
-  /\bselect\b/i,
-  /\benter\s+(?:a\s+)?choice\b/i,
-  /\brespond\b/i,
-];
-
-const LOW_PATTERNS: RegExp[] = [
-  /\binput\b/i,
-  /\bpress\s+key\b/i,
-  /\bprompt\b/i,
-];
 
 export class AgentStateEngine {
   private sessions = new Map<string, AgentStateSession>();
@@ -82,12 +47,10 @@ export class AgentStateEngine {
     this.onStateChange = listener;
   }
 
-  registerTerminal(terminalId: string, provider: ConfigProvider, detectionMode: WaitingDetectionMode = 'heuristic'): void {
+  registerTerminal(terminalId: string): void {
     const now = Date.now();
     this.clearWaitingTimer(terminalId);
     this.sessions.set(terminalId, {
-      provider,
-      detectionMode,
       state: 'running',
       confidence: 'medium',
       reason: 'terminal spawned',
@@ -96,7 +59,6 @@ export class AgentStateEngine {
       lastInputAt: now,
       lastStateAt: now,
       waitingCooldownUntil: 0,
-      lineBuffer: [],
     });
     this.emitState(terminalId);
   }
@@ -132,12 +94,6 @@ export class AgentStateEngine {
 
     session.lastOutputAt = Date.now();
     const lines = toNormalizedLines(data);
-    if (lines.length > 0) {
-      session.lineBuffer.push(...lines);
-      if (session.lineBuffer.length > MAX_LINE_BUFFER) {
-        session.lineBuffer = session.lineBuffer.slice(-MAX_LINE_BUFFER);
-      }
-    }
 
     const explicit = this.findExplicitState(lines);
     if (explicit) {
@@ -146,30 +102,14 @@ export class AgentStateEngine {
     } else if (session.state === 'waiting') {
       // Once waiting is active, plain output/noise must not clear it.
       return stripExplicitMarkerLines(data);
-    } else if (session.detectionMode === 'strict') {
+    } else {
       this.clearWaitingTimer(terminalId);
       this.transitionState(terminalId, {
         state: 'running',
         confidence: 'low',
-        reason: 'strict mode: awaiting explicit protocol/marker',
+        reason: 'awaiting explicit protocol/marker',
         source: 'timing',
       });
-    } else {
-      const detection = this.detectWaiting(session);
-      if (detection?.confidence === 'high') {
-        this.clearWaitingTimer(terminalId);
-        this.transitionState(terminalId, detection);
-      } else if (detection?.confidence === 'medium') {
-        this.scheduleWaitingConfirm(terminalId, detection);
-      } else {
-        this.clearWaitingTimer(terminalId);
-        this.transitionState(terminalId, {
-          state: 'running',
-          confidence: 'low',
-          reason: 'streaming output',
-          source: 'timing',
-        });
-      }
     }
 
     return stripExplicitMarkerLines(data);
@@ -242,21 +182,6 @@ export class AgentStateEngine {
     }
   }
 
-  private scheduleWaitingConfirm(terminalId: string, detection: DetectionResult): void {
-    this.clearWaitingTimer(terminalId);
-    const timer = setTimeout(() => {
-      const session = this.sessions.get(terminalId);
-      if (!session) return;
-      const silentLongEnough = Date.now() - session.lastOutputAt >= WAITING_CONFIRM_MS;
-      if (!silentLongEnough) return;
-      this.transitionState(terminalId, detection);
-    }, WAITING_CONFIRM_MS);
-    if (typeof (timer as any).unref === 'function') {
-      (timer as any).unref();
-    }
-    this.waitingTimers.set(terminalId, timer);
-  }
-
   private clearWaitingTimer(terminalId: string): void {
     const timer = this.waitingTimers.get(terminalId);
     if (!timer) return;
@@ -275,42 +200,6 @@ export class AgentStateEngine {
         confidence: 'high',
         reason: `explicit marker: ${raw}`,
         source: 'explicit',
-      };
-    }
-    return null;
-  }
-
-  private detectWaiting(session: AgentStateSession): DetectionResult | null {
-    const recent = session.lineBuffer;
-    if (recent.length === 0) return null;
-
-    if (matchesStructuredQuestion(recent)) {
-      return {
-        state: 'waiting',
-        confidence: 'high',
-        reason: 'interactive question/options pattern',
-        source: 'pattern',
-      };
-    }
-
-    const highHit = recent.some(line => HIGH_PATTERNS.some(re => re.test(line)));
-    if (highHit) {
-      return {
-        state: 'waiting',
-        confidence: 'high',
-        reason: `${session.provider} high-signal waiting prompt`,
-        source: 'keyword',
-      };
-    }
-
-    const mediumHits = recent.reduce((acc, line) => acc + (MEDIUM_PATTERNS.some(re => re.test(line)) ? 1 : 0), 0);
-    const lowHits = recent.reduce((acc, line) => acc + (LOW_PATTERNS.some(re => re.test(line)) ? 1 : 0), 0);
-    if (mediumHits >= 2 || (mediumHits >= 1 && lowHits >= 1)) {
-      return {
-        state: 'waiting',
-        confidence: 'medium',
-        reason: `${session.provider} medium-signal waiting candidate`,
-        source: 'keyword',
       };
     }
     return null;
@@ -375,8 +264,7 @@ function toNormalizedLines(input: string): string[] {
   return stripAnsi(input)
     .split(/\r?\n/)
     .map(line => line.replace(CONTROL_CHARS_RE, '').trim())
-    .filter(Boolean)
-    .map(line => line.slice(0, MAX_LINE_LENGTH));
+    .filter(Boolean);
 }
 
 function stripExplicitMarkerLines(input: string): string {
@@ -406,17 +294,4 @@ function hasSubmitInput(input: string): boolean {
 function hasCancelInput(input: string): boolean {
   // Esc key in xterm typically emits a single ESC byte.
   return /^\x1b+$/.test(input);
-}
-
-function matchesStructuredQuestion(lines: string[]): boolean {
-  const hasQuestionHeader = lines.some(line =>
-    /\bquestion\s+\d+\/\d+\b/i.test(line)
-    || /\bunanswered\b/i.test(line)
-    || /\bselect\b/i.test(line)
-    || /\bdo\s+you\s+want\s+to\b/i.test(line)
-    || /\?$/.test(line)
-  );
-  const optionCount = lines.filter(line => /^\s*(?:>\s*)?\d+\.\s+\S+/i.test(line)).length;
-  const hasCursorPointer = lines.some(line => /^\s*>\s*\d+\./.test(line));
-  return hasQuestionHeader && optionCount >= 2 && hasCursorPointer;
 }

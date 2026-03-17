@@ -1167,6 +1167,39 @@ html, body {
   margin-top: 8px;
 }
 
+.protocol-advanced {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+
+.protocol-advanced > summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  list-style: none;
+}
+
+.protocol-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.protocol-advanced > summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--text-muted);
+}
+
+.protocol-advanced[open] > summary::before {
+  content: '▾';
+}
+
+.protocol-advanced > .form-help {
+  margin-top: 8px;
+}
+
 .protocol-actions {
   display: flex;
   align-items: center;

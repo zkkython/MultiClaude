@@ -20,6 +20,7 @@ asarUnpack:
   - "node_modules/**/*.node"
   - "node_modules/node-pty/**"
   - "node_modules/.pnpm/**/node-pty/**"
+  - "dist/hooks/**"
 mac:
   category: public.app-category.developer-tools
   hardenedRuntime: true

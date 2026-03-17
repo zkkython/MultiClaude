@@ -123,8 +123,8 @@ export function showConfigEditor(
           <input type="number" id="cfg-timeout" value="${existing?.apiTimeoutMs ?? DEFAULTS.API_TIMEOUT_MS}" min="1000" step="1000" />
         </div>
 
-        <div class="form-group">
-          <label>Protocol Runner</label>
+        <details class="form-group protocol-advanced">
+          <summary>Protocol Runner (Advanced)</summary>
           <div class="form-help">Configure structured protocol transport. Leave as PTY to keep terminal-only mode.</div>
           <div class="protocol-grid">
             <div class="form-group">
@@ -171,11 +171,8 @@ export function showConfigEditor(
             </div>
             <div class="form-group">
               <label for="cfg-waiting-detection-mode">Waiting Detection</label>
-              <select id="cfg-waiting-detection-mode">
-                <option value="" ${(existing?.customEnvVars?.MC_WAITING_DETECTION_MODE || '') === '' ? 'selected' : ''}>auto (protocol=strict)</option>
-                <option value="strict" ${(existing?.customEnvVars?.MC_WAITING_DETECTION_MODE || '') === 'strict' ? 'selected' : ''}>strict (accurate, structured only)</option>
-                <option value="heuristic" ${(existing?.customEnvVars?.MC_WAITING_DETECTION_MODE || '') === 'heuristic' ? 'selected' : ''}>heuristic (text guess)</option>
-              </select>
+              <input type="text" id="cfg-waiting-detection-mode" value="strict" disabled />
+              <div class="form-help">Strict only. Waiting state is driven by structured protocol/hook events.</div>
             </div>
             <div class="form-group">
               <label for="cfg-protocol-headers-json">Headers JSON</label>
@@ -186,11 +183,11 @@ export function showConfigEditor(
             <button type="button" class="btn btn-sm" id="cfg-protocol-test">Test Connectivity</button>
             <span class="form-help" id="cfg-protocol-test-status"></span>
           </div>
-          <div class="protocol-actions">
-            <button type="button" class="btn btn-sm" id="cfg-claude-hooks-install">Install Claude Hooks</button>
-            <span class="form-help" id="cfg-claude-hooks-status"></span>
-          </div>
           <pre class="protocol-test-output hidden" id="cfg-protocol-test-output"></pre>
+        </details>
+        <div class="form-group protocol-actions">
+          <button type="button" class="btn btn-sm" id="cfg-claude-hooks-install">Install Claude Hooks</button>
+          <span class="form-help" id="cfg-claude-hooks-status"></span>
         </div>
 
         <div class="form-group">
@@ -508,7 +505,7 @@ function applyProtocolEnvOverrides(customEnvVars: Record<string, string>, modal:
   setOrDeleteEnv(customEnvVars, 'MC_PROTOCOL_AUTH_TOKEN', valueOf(modal, '#cfg-protocol-auth-token'));
   setOrDeleteEnv(customEnvVars, 'MC_PROTOCOL_RECONNECT_MAX', valueOf(modal, '#cfg-protocol-reconnect-max'));
   setOrDeleteEnv(customEnvVars, 'MC_PROTOCOL_RECONNECT_BASE_MS', valueOf(modal, '#cfg-protocol-reconnect-base-ms'));
-  setOrDeleteEnv(customEnvVars, 'MC_WAITING_DETECTION_MODE', valueOf(modal, '#cfg-waiting-detection-mode'));
+  delete customEnvVars.MC_WAITING_DETECTION_MODE;
   setOrDeleteEnv(customEnvVars, 'MC_PROTOCOL_HEADERS_JSON', valueOf(modal, '#cfg-protocol-headers-json'));
 }
 
