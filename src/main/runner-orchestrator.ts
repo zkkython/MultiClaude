@@ -1,9 +1,10 @@
-import type { ModelConfig, RunnerStartResult, RunnerUserInput } from '../shared/types.js';
+import type { ModelConfig, RunnerEvent, RunnerMetricsSnapshot, RunnerStartResult, RunnerUserInput } from '../shared/types.js';
 import { AgentStateEngine } from './agent-state-engine.js';
 import { ProtocolRunnerBridge } from './protocol-runner-bridge.js';
 import type { ProtocolSessionTransport } from './protocol-session-transport.js';
 
-type RunnerEventRecord = Record<string, unknown>;
+type RunnerEventRecord = RunnerEvent & Record<string, unknown>;
+type RunnerEventPartial = Partial<RunnerEventRecord> & Record<string, unknown>;
 
 export interface CreateSessionTransportResult {
   transport: ProtocolSessionTransport;
@@ -148,7 +149,7 @@ export class RunnerOrchestrator {
     this.pendingSidechannelEventsByTerminal.delete(terminalId);
   }
 
-  getMetricsSnapshot() {
+  getMetricsSnapshot(): RunnerMetricsSnapshot {
     return this.deps.protocolRunnerBridge.getMetricsSnapshot();
   }
 
@@ -238,7 +239,7 @@ export class RunnerOrchestrator {
     }
   }
 
-  private enrichLocalRunnerEvent(sessionId: string, partial: RunnerEventRecord): RunnerEventRecord {
+  private enrichLocalRunnerEvent(sessionId: string, partial: RunnerEventPartial): RunnerEventRecord {
     const provider = this.deps.protocolRunnerBridge.getSessionProvider(sessionId) ?? 'codex';
     return {
       id: `runner-local-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`,
@@ -263,10 +264,10 @@ function isPendingInputResolvedEvent(event: RunnerEventRecord): boolean {
   return hookName === 'userpromptsubmit';
 }
 
-function asRunnerEventMarker(rawEvent: unknown): RunnerEventRecord | null {
+function asRunnerEventMarker(rawEvent: unknown): RunnerEventPartial | null {
   if (!rawEvent || typeof rawEvent !== 'object') return null;
-  const container = rawEvent as RunnerEventRecord;
+  const container = rawEvent as Record<string, unknown>;
   const event = container.__mc_runner_event;
   if (!event || typeof event !== 'object') return null;
-  return event as RunnerEventRecord;
+  return event as RunnerEventPartial;
 }
