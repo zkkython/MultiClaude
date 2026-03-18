@@ -1,6 +1,4 @@
 import { ipcMain, BrowserWindow, dialog, Menu, Notification } from 'electron';
-import * as http from 'http';
-import { randomBytes } from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
@@ -17,13 +15,11 @@ import type { ProtocolConnectivityCheckInput, ProtocolConnectivityCheckResult } 
 import type { ClaudeHooksStatus } from '../shared/types.js';
 import { RunnerOrchestrator } from './runner-orchestrator.js';
 import { createSessionTransport, inferHttpSseDefaultsFromInput } from './runner-transport-factory.js';
+import { RunnerSidechannelGateway } from './runner-sidechannel-gateway.js';
 
 let nanoid: (size?: number) => string;
 const agentStateEngine = new AgentStateEngine();
 const protocolRunnerBridge = new ProtocolRunnerBridge();
-const sidechannelTokenByTerminal = new Map<string, string>();
-const SIDECAR_EVENT_PATH = '/v1/runner/event';
-const SIDECAR_MAX_BODY_BYTES = 128 * 1024;
 const CLAUDE_HOOK_EVENTS = [
   'Stop',
   'SubagentStop',
@@ -34,9 +30,6 @@ const CLAUDE_HOOK_EVENTS = [
   'PostToolUse',
   'SessionStart',
 ] as const;
-let sidechannelServer: http.Server | null = null;
-let sidechannelPort: number | null = null;
-let sidechannelStarting: Promise<void> | null = null;
 let hasWarnedClaudeHooksMissing = false;
 
 async function ensureNanoid() {
@@ -51,6 +44,12 @@ const runnerOrchestrator = new RunnerOrchestrator({
   protocolRunnerBridge,
   createSessionTransport,
   notifyRunnerEvent,
+});
+
+const runnerSidechannelGateway = new RunnerSidechannelGateway({
+  ingestEvent: (terminalId, event) => {
+    runnerOrchestrator.ingestSidechannelEvent(terminalId, event);
+  },
 });
 
 export function registerIpcHandlers(): void {
@@ -145,7 +144,11 @@ export function registerIpcHandlers(): void {
         });
       }
     }
-    await injectRunnerSidechannelEnv(terminalId, env);
+    try {
+      await runnerSidechannelGateway.injectEnv(terminalId, env);
+    } catch (err) {
+      console.warn('Failed to start runner sidechannel server:', err);
+    }
     agentStateEngine.registerTerminal(terminalId);
 
     spawnPty(
@@ -161,7 +164,7 @@ export function registerIpcHandlers(): void {
       (code: number) => {
         agentStateEngine.onExit(terminalId);
         runnerOrchestrator.cleanupTerminal(terminalId);
-        cleanupTerminalSidechannelState(terminalId);
+        runnerSidechannelGateway.cleanupTerminal(terminalId);
         notifyTerminalExit(terminalId, code);
       }
     );
@@ -183,7 +186,7 @@ export function registerIpcHandlers(): void {
     killPty(terminalId);
     agentStateEngine.unregisterTerminal(terminalId);
     runnerOrchestrator.cleanupTerminal(terminalId);
-    cleanupTerminalSidechannelState(terminalId);
+    runnerSidechannelGateway.cleanupTerminal(terminalId);
   });
 
   ipcMain.handle(IPC.TERMINAL_STATE_SNAPSHOT_GET, () => {
@@ -335,222 +338,6 @@ function notifyTerminalExit(terminalId: string, code: number): void {
       win.webContents.send(IPC.TERMINAL_EXIT, terminalId, code);
     }
   }
-}
-
-async function injectRunnerSidechannelEnv(terminalId: string, env: Record<string, string>): Promise<void> {
-  try {
-    await ensureRunnerSidechannelServer();
-  } catch (err) {
-    console.warn('Failed to start runner sidechannel server:', err);
-    return;
-  }
-  if (!sidechannelPort) return;
-  const token = randomBytes(24).toString('hex');
-  sidechannelTokenByTerminal.set(terminalId, token);
-  env.MC_RUNNER_EVENT_URL = `http://127.0.0.1:${sidechannelPort}${SIDECAR_EVENT_PATH}`;
-  env.MC_RUNNER_EVENT_TOKEN = token;
-  env.MC_RUNNER_TERMINAL_ID = terminalId;
-}
-
-async function ensureRunnerSidechannelServer(): Promise<void> {
-  if (sidechannelServer && sidechannelPort) return;
-  if (sidechannelStarting) return sidechannelStarting;
-
-  sidechannelStarting = new Promise<void>((resolve, reject) => {
-    const server = http.createServer((req, res) => {
-      void handleRunnerSidechannelRequest(req, res);
-    });
-    server.once('error', (err) => {
-      reject(err);
-    });
-    server.listen(0, '127.0.0.1', () => {
-      const addr = server.address();
-      if (!addr || typeof addr === 'string') {
-        reject(new Error('Invalid sidechannel server address'));
-        return;
-      }
-      sidechannelServer = server;
-      sidechannelPort = addr.port;
-      resolve();
-    });
-  });
-
-  try {
-    await sidechannelStarting;
-  } finally {
-    sidechannelStarting = null;
-  }
-}
-
-async function handleRunnerSidechannelRequest(
-  req: http.IncomingMessage,
-  res: http.ServerResponse<http.IncomingMessage>
-): Promise<void> {
-  if ((req.method || 'GET').toUpperCase() !== 'POST') {
-    res.writeHead(405);
-    res.end('method_not_allowed');
-    return;
-  }
-
-  const reqUrl = req.url || '/';
-  const path = reqUrl.split('?')[0];
-  if (path !== SIDECAR_EVENT_PATH) {
-    res.writeHead(404);
-    res.end('not_found');
-    return;
-  }
-
-  let rawBody = '';
-  let bytes = 0;
-  for await (const chunk of req) {
-    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
-    bytes += buf.length;
-    if (bytes > SIDECAR_MAX_BODY_BYTES) {
-      res.writeHead(413);
-      res.end('payload_too_large');
-      return;
-    }
-    rawBody += buf.toString('utf8');
-  }
-
-  let payload: Record<string, unknown>;
-  try {
-    const parsed = JSON.parse(rawBody || '{}');
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      res.writeHead(400);
-      res.end('invalid_payload');
-      return;
-    }
-    payload = parsed as Record<string, unknown>;
-  } catch {
-    res.writeHead(400);
-    res.end('invalid_json');
-    return;
-  }
-
-  const terminalId = readString(payload.terminalId) || readString(payload.termId) || readString(payload.tid);
-  if (!terminalId) {
-    res.writeHead(400);
-    res.end('missing_terminal_id');
-    return;
-  }
-
-  const expectedToken = sidechannelTokenByTerminal.get(terminalId);
-  if (!expectedToken) {
-    res.writeHead(404);
-    res.end('terminal_not_found');
-    return;
-  }
-  const providedToken = readSidechannelToken(req);
-  if (!providedToken || providedToken !== expectedToken) {
-    res.writeHead(401);
-    res.end('unauthorized');
-    return;
-  }
-
-  const normalized = normalizeSidechannelPayload(payload, terminalId);
-  if (!normalized) {
-    res.writeHead(400);
-    res.end('missing_event');
-    return;
-  }
-
-  runnerOrchestrator.ingestSidechannelEvent(terminalId, normalized);
-
-  res.writeHead(202);
-  res.end('accepted');
-}
-
-function readSidechannelToken(req: http.IncomingMessage): string | null {
-  const tokenHeader = req.headers['x-mc-runner-token'];
-  const token = Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader;
-  if (typeof token === 'string' && token.trim()) {
-    return token.trim();
-  }
-  const authHeader = req.headers.authorization;
-  const auth = Array.isArray(authHeader) ? authHeader[0] : authHeader;
-  if (typeof auth === 'string') {
-    const match = auth.match(/^Bearer\s+(.+)$/i);
-    if (match && match[1]) return match[1].trim();
-  }
-  return null;
-}
-
-function normalizeSidechannelPayload(payload: Record<string, unknown>, terminalId: string): unknown {
-  const rawEvent = payload.rawEvent;
-  if (rawEvent !== undefined) {
-    return rawEvent;
-  }
-
-  const marker = payload.runnerEvent;
-  if (marker && typeof marker === 'object' && !Array.isArray(marker)) {
-    return { __mc_runner_event: marker };
-  }
-
-  const event = payload.event;
-  if (event && typeof event === 'object' && !Array.isArray(event)) {
-    return event;
-  }
-
-  const state = readString(payload.state)?.toLowerCase();
-  if (!state) return null;
-  const now = Date.now();
-  const hookEventName = readHookEventName(payload);
-  if (state === 'waiting') {
-    const inputKind = readString(payload.inputKind) === 'text' ? 'text' : 'approval';
-    const requestId = readString(payload.requestId) || `side-wait-${terminalId}-${now}`;
-    const prompt = readString(payload.prompt) || 'User interaction required';
-    return {
-      __mc_runner_event: {
-        type: 'input.requested',
-        inputKind,
-        requestId,
-        prompt,
-        hookEventName,
-        source: 'sidechannel',
-      },
-    };
-  }
-  if (state === 'running') {
-    return {
-      __mc_runner_event: {
-        type: 'status.changed',
-        from: 'awaiting_input',
-        to: 'streaming',
-        reason: hookEventName ? `sidechannel-running:${hookEventName}` : 'sidechannel-running',
-        hookEventName,
-        source: 'sidechannel',
-      },
-    };
-  }
-  return {
-    __mc_runner_event: {
-      type: 'status.changed',
-      from: 'streaming',
-      to: state,
-      reason: hookEventName ? `sidechannel-state:${hookEventName}` : 'sidechannel-state',
-      hookEventName,
-      source: 'sidechannel',
-    },
-  };
-}
-
-function cleanupTerminalSidechannelState(terminalId: string): void {
-  sidechannelTokenByTerminal.delete(terminalId);
-}
-
-function readString(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
-function readHookEventName(payload: Record<string, unknown>): string | null {
-  const direct = readString(payload.hookEventName);
-  if (direct) return direct;
-  const rawHook = payload.rawHookEvent;
-  if (!rawHook || typeof rawHook !== 'object' || Array.isArray(rawHook)) return null;
-  return readString((rawHook as Record<string, unknown>).hook_event_name);
 }
 
 async function getClaudeHooksStatus(): Promise<ClaudeHooksStatus> {
