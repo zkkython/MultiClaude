@@ -18,18 +18,13 @@ import { HttpSseProtocolSessionTransport } from './protocol-http-transport.js';
 import type { ModelConfig } from '../shared/types.js';
 import type { ProtocolConnectivityCheckInput, ProtocolConnectivityCheckResult } from '../shared/types.js';
 import type { ClaudeHooksStatus } from '../shared/types.js';
+import { RunnerOrchestrator } from './runner-orchestrator.js';
 
 let nanoid: (size?: number) => string;
 const agentStateEngine = new AgentStateEngine();
 const protocolRunnerBridge = new ProtocolRunnerBridge();
-const runnerSessionToTerminal = new Map<string, string>();
-const terminalToRunnerSession = new Map<string, string>();
-const runnerTransportBySession = new Map<string, ProtocolSessionTransport>();
-const pendingInputSessions = new Set<string>();
 const sidechannelTokenByTerminal = new Map<string, string>();
-const sidechannelPendingByTerminal = new Map<string, unknown[]>();
 const SIDECAR_EVENT_PATH = '/v1/runner/event';
-const SIDECAR_MAX_QUEUE_PER_TERMINAL = 128;
 const SIDECAR_MAX_BODY_BYTES = 128 * 1024;
 const CLAUDE_HOOK_EVENTS = [
   'Stop',
@@ -52,6 +47,13 @@ async function ensureNanoid() {
     nanoid = mod.nanoid;
   }
 }
+
+const runnerOrchestrator = new RunnerOrchestrator({
+  agentStateEngine,
+  protocolRunnerBridge,
+  createSessionTransport,
+  notifyRunnerEvent,
+});
 
 export function registerIpcHandlers(): void {
   agentStateEngine.setStateListener(({ terminalId, ...runtimeState }) => {
@@ -153,14 +155,14 @@ export function registerIpcHandlers(): void {
       env,
       (data: string) => {
         const displayData = agentStateEngine.onOutput(terminalId, data);
-        ingestRunnerEventsFromTerminalOutput(terminalId, data);
+        runnerOrchestrator.ingestTerminalOutput(terminalId, data);
         if (displayData) {
           notifyTerminalData(terminalId, displayData);
         }
       },
       (code: number) => {
         agentStateEngine.onExit(terminalId);
-        cleanupRunnerSessionByTerminal(terminalId);
+        runnerOrchestrator.cleanupTerminal(terminalId);
         cleanupTerminalSidechannelState(terminalId);
         notifyTerminalExit(terminalId, code);
       }
@@ -182,7 +184,7 @@ export function registerIpcHandlers(): void {
     agentStateEngine.onExit(terminalId);
     killPty(terminalId);
     agentStateEngine.unregisterTerminal(terminalId);
-    cleanupRunnerSessionByTerminal(terminalId);
+    runnerOrchestrator.cleanupTerminal(terminalId);
     cleanupTerminalSidechannelState(terminalId);
   });
 
@@ -199,90 +201,39 @@ export function registerIpcHandlers(): void {
     }
 
     const sessionId = `runner-${nanoid(12)}`;
-    protocolRunnerBridge.startSession(sessionId, config.provider);
-    let transportType: 'pty' | 'http_sse' = 'pty';
-    if (terminalId) {
-      runnerSessionToTerminal.set(sessionId, terminalId);
-      terminalToRunnerSession.set(terminalId, sessionId);
-      flushPendingSidechannelEvents(terminalId, sessionId);
-      const created = createSessionTransport(config, sessionId, terminalId);
-      const transport = created.transport;
-      transportType = created.transportType;
-      runnerTransportBySession.set(sessionId, transport);
-      if (transport.start) {
-        transport.start((rawEvent: unknown) => {
-          processTransportRawEvent(sessionId, rawEvent);
-        });
-      }
-    }
-    return {
-      sessionId,
-      provider: config.provider,
-      linkedTerminalId: terminalId,
-      transportType,
-    };
+    return runnerOrchestrator.startSession({ sessionId, config, terminalId });
   });
 
   ipcMain.handle(IPC.RUNNER_EVENT_INGEST, (_event, sessionId: string, rawEvent: unknown) => {
-    const events = protocolRunnerBridge.ingestRawEvent(sessionId, rawEvent);
-    dispatchRunnerEvents(sessionId, events);
+    runnerOrchestrator.ingestRawEvent(sessionId, rawEvent);
   });
 
   ipcMain.handle(IPC.RUNNER_INPUT_RESOLVE, (_event, sessionId: string, requestId: string) => {
-    return protocolRunnerBridge.resolveInput(sessionId, requestId);
+    return runnerOrchestrator.resolveInput(sessionId, requestId);
   });
 
   ipcMain.handle(IPC.RUNNER_INPUT_SUBMIT, (_event, input: RunnerUserInput) => {
-    const accepted = protocolRunnerBridge.resolveInput(input.sessionId, input.requestId);
-    if (!accepted) return false;
-    pendingInputSessions.delete(input.sessionId);
-
-    const transport = runnerTransportBySession.get(input.sessionId);
-    if (transport) {
-      transport.submitInput(input);
-    }
-
-    const provider = protocolRunnerBridge.getSessionProvider(input.sessionId) ?? 'codex';
-    const localEvent = {
-      id: `runner-local-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`,
-      ts: Date.now(),
-      provider,
-      sessionId: input.sessionId,
-      type: 'status.changed',
-      from: 'awaiting_input',
-      to: 'streaming',
-      reason: input.type,
-    };
-    applyRuntimeStateFromRunnerEvent(input.sessionId, localEvent);
-    notifyRunnerEvent(localEvent);
-    return true;
+    return runnerOrchestrator.submitInput(input);
   });
 
   ipcMain.handle(IPC.RUNNER_SESSION_INTERRUPT, (_event, sessionId: string) => {
-    const transport = runnerTransportBySession.get(sessionId);
-    if (!transport) return false;
-    transport.interrupt();
-    return true;
+    return runnerOrchestrator.interruptSession(sessionId);
   });
 
   ipcMain.handle(IPC.RUNNER_SESSION_STOP, (_event, sessionId: string) => {
-    const transport = runnerTransportBySession.get(sessionId);
-    if (!transport) return false;
-    transport.stop();
-    return true;
+    return runnerOrchestrator.stopSession(sessionId);
   });
 
   ipcMain.handle(IPC.RUNNER_SESSION_END, (_event, sessionId: string) => {
-    protocolRunnerBridge.endSession(sessionId);
-    cleanupRunnerSessionById(sessionId);
+    runnerOrchestrator.endSession(sessionId);
   });
 
   ipcMain.handle(IPC.RUNNER_METRICS_GET, () => {
-    return protocolRunnerBridge.getMetricsSnapshot();
+    return runnerOrchestrator.getMetricsSnapshot();
   });
 
   ipcMain.handle(IPC.RUNNER_METRICS_RESET, () => {
-    protocolRunnerBridge.resetMetrics();
+    runnerOrchestrator.resetMetrics();
   });
 
   ipcMain.handle(IPC.RUNNER_CONNECTIVITY_TEST, async (_event, input: ProtocolConnectivityCheckInput) => {
@@ -386,48 +337,6 @@ function notifyTerminalExit(terminalId: string, code: number): void {
       win.webContents.send(IPC.TERMINAL_EXIT, terminalId, code);
     }
   }
-}
-
-function dispatchRunnerEvents(sessionId: string, events: Array<any>): void {
-  for (const event of events) {
-    applyRuntimeStateFromRunnerEvent(sessionId, event);
-    notifyRunnerEvent(event);
-    if (event.type === 'session.completed' || event.type === 'session.failed') {
-      pendingInputSessions.delete(sessionId);
-      protocolRunnerBridge.endSession(sessionId);
-      cleanupRunnerSessionById(sessionId);
-    }
-  }
-}
-
-function ingestRunnerEventsFromTerminalOutput(terminalId: string, chunk: string): void {
-  const sessionId = terminalToRunnerSession.get(terminalId);
-  if (!sessionId || !chunk) return;
-
-  const transport = runnerTransportBySession.get(sessionId);
-  if (!transport) return;
-
-  const rawEvents = transport.ingestChunk(chunk);
-  for (const rawEvent of rawEvents) {
-    processTransportRawEvent(sessionId, rawEvent);
-  }
-}
-
-function cleanupRunnerSessionByTerminal(terminalId: string): void {
-  const sessionId = terminalToRunnerSession.get(terminalId);
-  if (!sessionId) return;
-  cleanupRunnerSessionById(sessionId);
-  protocolRunnerBridge.endSession(sessionId);
-}
-
-function cleanupRunnerSessionById(sessionId: string): void {
-  pendingInputSessions.delete(sessionId);
-  const terminalId = runnerSessionToTerminal.get(sessionId);
-  if (terminalId) {
-    terminalToRunnerSession.delete(terminalId);
-  }
-  runnerSessionToTerminal.delete(sessionId);
-  runnerTransportBySession.delete(sessionId);
 }
 
 async function injectRunnerSidechannelEnv(terminalId: string, env: Record<string, string>): Promise<void> {
@@ -548,12 +457,7 @@ async function handleRunnerSidechannelRequest(
     return;
   }
 
-  const sessionId = terminalToRunnerSession.get(terminalId);
-  if (sessionId) {
-    processTransportRawEvent(sessionId, normalized);
-  } else {
-    queuePendingSidechannelEvent(terminalId, normalized);
-  }
+  runnerOrchestrator.ingestSidechannelEvent(terminalId, normalized);
 
   res.writeHead(202);
   res.end('accepted');
@@ -633,27 +537,8 @@ function normalizeSidechannelPayload(payload: Record<string, unknown>, terminalI
   };
 }
 
-function queuePendingSidechannelEvent(terminalId: string, event: unknown): void {
-  const pending = sidechannelPendingByTerminal.get(terminalId) ?? [];
-  pending.push(event);
-  if (pending.length > SIDECAR_MAX_QUEUE_PER_TERMINAL) {
-    pending.splice(0, pending.length - SIDECAR_MAX_QUEUE_PER_TERMINAL);
-  }
-  sidechannelPendingByTerminal.set(terminalId, pending);
-}
-
-function flushPendingSidechannelEvents(terminalId: string, sessionId: string): void {
-  const pending = sidechannelPendingByTerminal.get(terminalId);
-  if (!pending || pending.length === 0) return;
-  sidechannelPendingByTerminal.delete(terminalId);
-  for (const event of pending) {
-    processTransportRawEvent(sessionId, event);
-  }
-}
-
 function cleanupTerminalSidechannelState(terminalId: string): void {
   sidechannelTokenByTerminal.delete(terminalId);
-  sidechannelPendingByTerminal.delete(terminalId);
 }
 
 function readString(value: unknown): string | null {
@@ -952,95 +837,6 @@ function parsePositiveInt(value: string | undefined): number | undefined {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
   return parsed;
-}
-
-function processTransportRawEvent(sessionId: string, rawEvent: unknown): void {
-  const marker = asRunnerEventMarker(rawEvent);
-  if (marker) {
-    const event = enrichLocalRunnerEvent(sessionId, marker);
-    applyRuntimeStateFromRunnerEvent(sessionId, event);
-    notifyRunnerEvent(event);
-    return;
-  }
-  const events = protocolRunnerBridge.ingestRawEvent(sessionId, rawEvent);
-  dispatchRunnerEvents(sessionId, events);
-}
-
-function applyRuntimeStateFromRunnerEvent(sessionId: string, event: Record<string, unknown>): void {
-  const terminalId = runnerSessionToTerminal.get(sessionId);
-  if (!terminalId) return;
-  const type = typeof event.type === 'string' ? event.type : '';
-  if (type === 'input.requested') {
-    pendingInputSessions.add(sessionId);
-    agentStateEngine.applyExplicitState(terminalId, 'waiting', 'protocol input requested', 'high');
-    return;
-  }
-  if (type === 'status.changed') {
-    const to = typeof event.to === 'string' ? event.to : '';
-    const hasPendingInput = pendingInputSessions.has(sessionId);
-    if (to === 'streaming' || to === 'fallback_pty') {
-      if (hasPendingInput && !isPendingInputResolvedEvent(event)) {
-        return;
-      }
-      pendingInputSessions.delete(sessionId);
-      agentStateEngine.applyExplicitState(terminalId, 'running', 'protocol session streaming', 'high');
-      return;
-    }
-    if (to === 'idle') {
-      if (hasPendingInput) return;
-      agentStateEngine.applyExplicitState(terminalId, 'idle', 'protocol session idle', 'high');
-      return;
-    }
-    if (to === 'awaiting_input') {
-      pendingInputSessions.add(sessionId);
-      agentStateEngine.applyExplicitState(terminalId, 'waiting', 'protocol awaiting input', 'high');
-      return;
-    }
-  }
-  if (type === 'session.completed') {
-    pendingInputSessions.delete(sessionId);
-    agentStateEngine.applyExplicitState(terminalId, 'idle', 'protocol session completed', 'high');
-    return;
-  }
-  if (type === 'session.failed') {
-    pendingInputSessions.delete(sessionId);
-    agentStateEngine.applyExplicitState(terminalId, 'running', 'protocol session failed', 'medium');
-  }
-}
-
-function isPendingInputResolvedEvent(event: Record<string, unknown>): boolean {
-  const reason = typeof event.reason === 'string' ? event.reason.trim().toLowerCase() : '';
-  // Local explicit submit path (RUNNER_INPUT_SUBMIT).
-  if (reason === 'approval' || reason === 'text') return true;
-  const explicitHook = typeof event.hookEventName === 'string'
-    ? event.hookEventName.trim().toLowerCase()
-    : '';
-  const reasonHook = reason.includes(':')
-    ? reason.split(':').slice(1).join(':').trim().toLowerCase()
-    : '';
-  const hookName = explicitHook || reasonHook;
-
-  // Sidechannel explicit submit path only.
-  return hookName === 'userpromptsubmit';
-}
-
-function asRunnerEventMarker(rawEvent: unknown): Record<string, unknown> | null {
-  if (!rawEvent || typeof rawEvent !== 'object') return null;
-  const container = rawEvent as Record<string, unknown>;
-  const event = container.__mc_runner_event;
-  if (!event || typeof event !== 'object') return null;
-  return event as Record<string, unknown>;
-}
-
-function enrichLocalRunnerEvent(sessionId: string, partial: Record<string, unknown>): Record<string, unknown> {
-  const provider = protocolRunnerBridge.getSessionProvider(sessionId) ?? 'codex';
-  return {
-    id: `runner-local-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`,
-    ts: Date.now(),
-    provider,
-    sessionId,
-    ...partial,
-  };
 }
 
 async function runProtocolConnectivityTest(input: ProtocolConnectivityCheckInput): Promise<ProtocolConnectivityCheckResult> {
