@@ -3,8 +3,25 @@ import { AgentStateEngine } from './agent-state-engine.js';
 import { ProtocolRunnerBridge } from './protocol-runner-bridge.js';
 import type { ProtocolSessionTransport } from './protocol-session-transport.js';
 
-type RunnerEventRecord = RunnerEvent & Record<string, unknown>;
-type RunnerEventPartial = Partial<RunnerEventRecord> & Record<string, unknown>;
+interface MarkerInputRequested {
+  type: 'input.requested';
+  inputKind?: string;
+  requestId?: string;
+  prompt?: string;
+  hookEventName?: string;
+  source?: string;
+}
+
+interface MarkerStatusChanged {
+  type: 'status.changed';
+  from?: string;
+  to?: string;
+  reason?: string;
+  hookEventName?: string;
+  source?: string;
+}
+
+type LocalRunnerMarker = MarkerInputRequested | MarkerStatusChanged;
 
 export interface CreateSessionTransportResult {
   transport: ProtocolSessionTransport;
@@ -15,7 +32,7 @@ export interface RunnerOrchestratorDeps {
   agentStateEngine: AgentStateEngine;
   protocolRunnerBridge: ProtocolRunnerBridge;
   createSessionTransport: (config: ModelConfig, sessionId: string, terminalId: string) => CreateSessionTransportResult;
-  notifyRunnerEvent: (event: RunnerEventRecord) => void;
+  notifyRunnerEvent: (event: RunnerEvent) => void;
 }
 
 interface StartSessionInput {
@@ -86,7 +103,7 @@ export class RunnerOrchestrator {
     }
 
     const provider = this.deps.protocolRunnerBridge.getSessionProvider(input.sessionId) ?? 'codex';
-    const localEvent: RunnerEventRecord = {
+    const localEvent: RunnerEvent = {
       id: `runner-local-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`,
       ts: Date.now(),
       provider,
@@ -157,7 +174,7 @@ export class RunnerOrchestrator {
     this.deps.protocolRunnerBridge.resetMetrics();
   }
 
-  private dispatchRunnerEvents(sessionId: string, events: RunnerEventRecord[]): void {
+  private dispatchRunnerEvents(sessionId: string, events: RunnerEvent[]): void {
     for (const event of events) {
       this.applyRuntimeStateFromRunnerEvent(sessionId, event);
       this.deps.notifyRunnerEvent(event);
@@ -197,17 +214,17 @@ export class RunnerOrchestrator {
     this.pendingSidechannelEventsByTerminal.set(terminalId, pending);
   }
 
-  private applyRuntimeStateFromRunnerEvent(sessionId: string, event: RunnerEventRecord): void {
+  private applyRuntimeStateFromRunnerEvent(sessionId: string, event: RunnerEvent): void {
     const terminalId = this.runnerSessionToTerminal.get(sessionId);
     if (!terminalId) return;
-    const type = typeof event.type === 'string' ? event.type : '';
+    const type = event.type;
     if (type === 'input.requested') {
       this.pendingInputSessions.add(sessionId);
       this.deps.agentStateEngine.applyExplicitState(terminalId, 'waiting', 'protocol input requested', 'high');
       return;
     }
     if (type === 'status.changed') {
-      const to = typeof event.to === 'string' ? event.to : '';
+      const to = readOptionalString(event.to);
       const hasPendingInput = this.pendingInputSessions.has(sessionId);
       if (to === 'streaming' || to === 'fallback_pty') {
         if (hasPendingInput && !isPendingInputResolvedEvent(event)) {
@@ -239,7 +256,7 @@ export class RunnerOrchestrator {
     }
   }
 
-  private enrichLocalRunnerEvent(sessionId: string, partial: RunnerEventPartial): RunnerEventRecord {
+  private enrichLocalRunnerEvent(sessionId: string, partial: LocalRunnerMarker): RunnerEvent {
     const provider = this.deps.protocolRunnerBridge.getSessionProvider(sessionId) ?? 'codex';
     return {
       id: `runner-local-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`,
@@ -251,12 +268,10 @@ export class RunnerOrchestrator {
   }
 }
 
-function isPendingInputResolvedEvent(event: RunnerEventRecord): boolean {
-  const reason = typeof event.reason === 'string' ? event.reason.trim().toLowerCase() : '';
+function isPendingInputResolvedEvent(event: RunnerEvent): boolean {
+  const reason = readOptionalString(event.reason)?.trim().toLowerCase() || '';
   if (reason === 'approval' || reason === 'text') return true;
-  const explicitHook = typeof event.hookEventName === 'string'
-    ? event.hookEventName.trim().toLowerCase()
-    : '';
+  const explicitHook = readOptionalString(event.hookEventName)?.trim().toLowerCase() || '';
   const reasonHook = reason.includes(':')
     ? reason.split(':').slice(1).join(':').trim().toLowerCase()
     : '';
@@ -264,10 +279,36 @@ function isPendingInputResolvedEvent(event: RunnerEventRecord): boolean {
   return hookName === 'userpromptsubmit';
 }
 
-function asRunnerEventMarker(rawEvent: unknown): RunnerEventPartial | null {
+function asRunnerEventMarker(rawEvent: unknown): LocalRunnerMarker | null {
   if (!rawEvent || typeof rawEvent !== 'object') return null;
   const container = rawEvent as Record<string, unknown>;
   const event = container.__mc_runner_event;
   if (!event || typeof event !== 'object') return null;
-  return event as RunnerEventPartial;
+  const marker = event as Record<string, unknown>;
+  const type = readOptionalString(marker.type);
+  if (type === 'input.requested') {
+    return {
+      type,
+      inputKind: readOptionalString(marker.inputKind) || undefined,
+      requestId: readOptionalString(marker.requestId) || undefined,
+      prompt: readOptionalString(marker.prompt) || undefined,
+      hookEventName: readOptionalString(marker.hookEventName) || undefined,
+      source: readOptionalString(marker.source) || undefined,
+    };
+  }
+  if (type === 'status.changed') {
+    return {
+      type,
+      from: readOptionalString(marker.from) || undefined,
+      to: readOptionalString(marker.to) || undefined,
+      reason: readOptionalString(marker.reason) || undefined,
+      hookEventName: readOptionalString(marker.hookEventName) || undefined,
+      source: readOptionalString(marker.source) || undefined,
+    };
+  }
+  return null;
+}
+
+function readOptionalString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
 }

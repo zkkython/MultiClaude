@@ -10,7 +10,7 @@ import { spawnPty, writePty, resizePty, killPty } from './pty-manager.js';
 import { openSystemTerminal } from './system-terminal.js';
 import { AgentStateEngine } from './agent-state-engine.js';
 import { ProtocolRunnerBridge } from './protocol-runner-bridge.js';
-import type { RunnerUserInput } from '../shared/types.js';
+import type { RunnerEvent, RunnerUserInput } from '../shared/types.js';
 import type { ProtocolConnectivityCheckInput, ProtocolConnectivityCheckResult } from '../shared/types.js';
 import type { ClaudeHooksStatus } from '../shared/types.js';
 import { RunnerOrchestrator } from './runner-orchestrator.js';
@@ -313,7 +313,7 @@ function notifyConfigChanged(): void {
   }
 }
 
-function notifyRunnerEvent(event: unknown): void {
+function notifyRunnerEvent(event: RunnerEvent): void {
   const wins = BrowserWindow.getAllWindows();
   for (const win of wins) {
     if (!win.isDestroyed()) {
