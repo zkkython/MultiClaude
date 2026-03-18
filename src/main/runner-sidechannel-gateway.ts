@@ -30,6 +30,18 @@ export class RunnerSidechannelGateway {
     this.tokenByTerminal.delete(terminalId);
   }
 
+  async close(): Promise<void> {
+    this.tokenByTerminal.clear();
+    const server = this.server;
+    this.server = null;
+    this.port = null;
+    this.starting = null;
+    if (!server) return;
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+    });
+  }
+
   private async ensureServer(): Promise<void> {
     if (this.server && this.port) return;
     if (this.starting) return this.starting;
@@ -106,7 +118,7 @@ export class RunnerSidechannelGateway {
       return;
     }
 
-    const terminalId = readString(payload.terminalId) || readString(payload.termId) || readString(payload.tid);
+    const terminalId = readTerminalIdFromPayload(payload);
     if (!terminalId) {
       res.writeHead(400);
       res.end('missing_terminal_id');
@@ -119,7 +131,7 @@ export class RunnerSidechannelGateway {
       res.end('terminal_not_found');
       return;
     }
-    const providedToken = readSidechannelToken(req);
+    const providedToken = readSidechannelTokenFromHeaders(req.headers);
     if (!providedToken || providedToken !== expectedToken) {
       res.writeHead(401);
       res.end('unauthorized');
@@ -139,13 +151,13 @@ export class RunnerSidechannelGateway {
   }
 }
 
-function readSidechannelToken(req: http.IncomingMessage): string | null {
-  const tokenHeader = req.headers['x-mc-runner-token'];
+export function readSidechannelTokenFromHeaders(headers: http.IncomingHttpHeaders): string | null {
+  const tokenHeader = headers['x-mc-runner-token'];
   const token = Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader;
   if (typeof token === 'string' && token.trim()) {
     return token.trim();
   }
-  const authHeader = req.headers.authorization;
+  const authHeader = headers.authorization;
   const auth = Array.isArray(authHeader) ? authHeader[0] : authHeader;
   if (typeof auth === 'string') {
     const match = auth.match(/^Bearer\s+(.+)$/i);
@@ -154,7 +166,11 @@ function readSidechannelToken(req: http.IncomingMessage): string | null {
   return null;
 }
 
-function normalizeSidechannelPayload(payload: Record<string, unknown>, terminalId: string): unknown {
+export function readTerminalIdFromPayload(payload: Record<string, unknown>): string | null {
+  return readString(payload.terminalId) || readString(payload.termId) || readString(payload.tid);
+}
+
+export function normalizeSidechannelPayload(payload: Record<string, unknown>, terminalId: string): unknown {
   const rawEvent = payload.rawEvent;
   if (rawEvent !== undefined) {
     return rawEvent;
