@@ -19,6 +19,14 @@ async function run() {
       entry: path.resolve(__dirname, '../src/main/__tests__/runner-sidechannel-gateway.test.ts'),
       out: path.join(tmpDir, 'runner-sidechannel-gateway.test.cjs'),
     },
+    {
+      entry: path.resolve(__dirname, '../src/renderer/__tests__/store.test.ts'),
+      out: path.join(tmpDir, 'renderer-store.test.cjs'),
+    },
+    {
+      entry: path.resolve(__dirname, '../src/renderer/__tests__/status-bar.test.ts'),
+      out: path.join(tmpDir, 'renderer-status-bar.test.cjs'),
+    },
   ];
 
   try {

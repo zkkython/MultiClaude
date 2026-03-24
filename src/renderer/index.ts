@@ -16,6 +16,7 @@ import {
 } from './components/TerminalView.js';
 import { createWelcomeScreen } from './components/WelcomeScreen.js';
 import { createStatusBar } from './components/StatusBar.js';
+import { showPreferencesEditor } from './components/PreferencesEditor.js';
 import type {
   ModelConfig,
   RuntimeState,
@@ -48,6 +49,7 @@ async function init() {
     tabIds: [],
   }));
   setState({ sidebarWidth: settings.sidebarWidth, groups });
+  setState({ useWebglRenderer: Boolean(settings.useWebglRenderer) });
 
   // Load configs
   const configs = await window.multiclaude.config.getAll();
@@ -573,8 +575,7 @@ async function handleMenuAction(action: string, payload?: any) {
       break;
     }
     case 'preferences':
-      // Focus sidebar
-      setState({ sidebarVisible: true });
+      openPreferences();
       break;
     case 'auto-group-by-config':
       autoGroupByConfig();
@@ -603,6 +604,18 @@ function saveGroupsToSettings() {
     associatedConfigIds: g.associatedConfigIds,
   }));
   window.multiclaude.app.saveSettings({ groups: persisted });
+}
+
+function openPreferences() {
+  const state = getState();
+  showPreferencesEditor(
+    { sidebarWidth: state.sidebarWidth, groups: state.groups, useWebglRenderer: state.useWebglRenderer },
+    async (result) => {
+      setState({ useWebglRenderer: result.useWebglRenderer });
+      await window.multiclaude.app.saveSettings({ useWebglRenderer: result.useWebglRenderer });
+    },
+    () => {},
+  );
 }
 
 function findTabByTerminalId(terminalId: string): string | undefined {

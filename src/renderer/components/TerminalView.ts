@@ -7,11 +7,46 @@ import { getState } from '../state/store.js';
 interface TerminalInstance {
   terminal: Terminal;
   fitAddon: FitAddon;
+  webglAddon: WebglAddon | null;
   container: HTMLElement;
   terminalId: string;
 }
 
 const instances = new Map<string, TerminalInstance>();
+
+function isWebglOptInEnabled(): boolean {
+  return getState().useWebglRenderer;
+}
+
+function attachOptionalWebglRenderer(terminal: Terminal): WebglAddon | null {
+  if (!isWebglOptInEnabled()) return null;
+
+  try {
+    const addon = new WebglAddon();
+    let disposed = false;
+
+    const onContextLossDisposable = addon.onContextLoss(() => {
+      if (disposed) return;
+      disposed = true;
+      console.warn('[xterm] WebGL context lost; falling back to canvas renderer.');
+      onContextLossDisposable.dispose();
+      addon.dispose();
+    });
+
+    terminal.onDispose(() => {
+      if (disposed) return;
+      disposed = true;
+      onContextLossDisposable.dispose();
+      addon.dispose();
+    });
+
+    terminal.loadAddon(addon);
+    return addon;
+  } catch (error) {
+    console.warn('[xterm] WebGL renderer unavailable; using canvas renderer.', error);
+    return null;
+  }
+}
 
 export function createTerminalContainer(): HTMLElement {
   const container = document.createElement('div');
@@ -67,12 +102,8 @@ export function createTerminalView(
 
   terminal.open(container);
 
-  // Try WebGL addon (falls back gracefully)
-  try {
-    terminal.loadAddon(new WebglAddon());
-  } catch {
-    // WebGL not supported, fall back to canvas renderer
-  }
+  // Default renderer is canvas; WebGL is opt-in and auto-falls-back on context loss.
+  const webglAddon = attachOptionalWebglRenderer(terminal);
 
   // Wire data to PTY
   terminal.onData((data) => {
@@ -90,7 +121,7 @@ export function createTerminalView(
     window.multiclaude.contextMenu.show(terminalId, terminal.hasSelection());
   });
 
-  instances.set(tabId, { terminal, fitAddon, container, terminalId });
+  instances.set(tabId, { terminal, fitAddon, webglAddon, container, terminalId });
 
   // Initial fit
   requestAnimationFrame(() => {
@@ -123,6 +154,7 @@ export function showTerminal(tabId: string): void {
 export function destroyTerminal(tabId: string): void {
   const instance = instances.get(tabId);
   if (instance) {
+    instance.webglAddon?.dispose();
     instance.terminal.dispose();
     instance.container.remove();
     instances.delete(tabId);

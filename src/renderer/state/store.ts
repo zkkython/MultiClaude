@@ -18,6 +18,7 @@ export interface AppState {
   sidebarWidth: number;
   searchQuery: string;
   fontSize: number;
+  useWebglRenderer: boolean;
   groups: TabGroup[];
   runtimeStatesByTabId: Record<string, TerminalRuntimeState>;
   protocolMetrics: RunnerMetricsSnapshot | null;
@@ -32,6 +33,7 @@ const initialState: AppState = {
   sidebarWidth: 260,
   searchQuery: '',
   fontSize: 14,
+  useWebglRenderer: false,
   groups: [],
   runtimeStatesByTabId: {},
   protocolMetrics: null,
@@ -133,6 +135,7 @@ export function getTabRuntimeState(tabId: string): TerminalRuntimeState | undefi
 }
 
 export function getTabEffectiveState(tab: TerminalTab): RuntimeState {
+  if (tab.status === 'exited') return 'exited';
   return state.runtimeStatesByTabId[tab.id]?.state || tab.status;
 }
 

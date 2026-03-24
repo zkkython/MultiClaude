@@ -63,6 +63,14 @@ export function createAppMenu(): void {
       { role: 'copy' },
       { role: 'paste' },
       { role: 'selectAll' },
+      ...(isMac ? [] : [
+        { type: 'separator' as const },
+        {
+          label: 'Preferences...',
+          accelerator: 'Ctrl+,',
+          click: () => sendMenuAction('preferences'),
+        },
+      ]),
     ],
   });
 

@@ -88,6 +88,7 @@ export interface TabGroupPersisted {
 export interface AppSettings {
   sidebarWidth: number;
   groups?: TabGroupPersisted[];
+  useWebglRenderer?: boolean;
 }
 
 export type RunnerEventType =
