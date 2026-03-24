@@ -71,7 +71,8 @@ export function createTerminalView(
   const terminal = new Terminal({
     cursorBlink: true,
     fontSize: state.fontSize,
-    fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+    fontFamily: '"SF Mono", Menlo, Monaco, "Cascadia Mono", "JetBrains Mono", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans Mono CJK SC", "Courier New", monospace',
+    customGlyphs: false,
     theme: {
       background: '#1e1e2e',
       foreground: '#cdd6f4',
@@ -169,6 +170,19 @@ export function fitAllTerminals(): void {
   }
 }
 
+export function repaintVisibleTerminals(): void {
+  for (const inst of instances.values()) {
+    if (inst.container.style.display === 'none') continue;
+    try {
+      inst.fitAddon.fit();
+      const rows = Math.max(inst.terminal.rows - 1, 0);
+      inst.terminal.refresh(0, rows);
+    } catch (err) {
+      console.warn('[xterm] repaint failed:', err);
+    }
+  }
+}
+
 export function getTerminalIdForTab(tabId: string): string | undefined {
   return instances.get(tabId)?.terminalId;
 }
@@ -213,4 +227,14 @@ export function setTerminalFontSize(size: number): void {
 // Handle window resize
 window.addEventListener('resize', () => {
   fitAllTerminals();
+});
+
+window.addEventListener('focus', () => {
+  repaintVisibleTerminals();
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    repaintVisibleTerminals();
+  }
 });
