@@ -42,6 +42,11 @@ export function createAppMenu(): void {
         accelerator: 'CmdOrCtrl+Shift+T',
         click: () => sendMenuAction('new-system-terminal'),
       },
+      {
+        label: 'New Worktree Terminal',
+        accelerator: 'CmdOrCtrl+Alt+T',
+        click: () => sendMenuAction('new-worktree-terminal'),
+      },
       { type: 'separator' },
       {
         label: 'Close Terminal',
@@ -127,6 +132,11 @@ export function createAppMenu(): void {
         label: 'Next Waiting Terminal',
         accelerator: 'CmdOrCtrl+;',
         click: () => sendMenuAction('next-waiting'),
+      },
+      {
+        label: 'Restore Last Workspace',
+        accelerator: 'CmdOrCtrl+Shift+R',
+        click: () => sendMenuAction('restore-last-workspace'),
       },
       { type: 'separator' },
       ...Array.from({ length: 9 }, (_, i) => ({

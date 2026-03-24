@@ -7,6 +7,7 @@ import type {
   ModelConfigCreate,
   ModelConfigUpdate,
   ImportResult,
+  WorkspaceSnapshotV1,
 } from '../shared/types.js';
 import { DEFAULTS } from '../shared/constants.js';
 import { getCodexHomePath, getEnvFilePath, getZdotdirPath } from './config-paths.js';
@@ -37,6 +38,10 @@ function getConfigBackupPath(): string {
 
 function getSettingsPath(): string {
   return path.join(app.getPath('userData'), 'settings.json');
+}
+
+function getWorkspaceSnapshotPath(): string {
+  return path.join(app.getPath('userData'), 'workspace-snapshot.json');
 }
 
 function isProvider(value: unknown): value is ConfigProvider {
@@ -365,17 +370,42 @@ export async function importConfigs(filePath: string): Promise<ImportResult> {
   return result;
 }
 
-export function getSettings(): { sidebarWidth: number; groups: any[]; useWebglRenderer: boolean } {
+export function getSettings(): {
+  sidebarWidth: number;
+  groups: any[];
+  useWebglRenderer: boolean;
+  restoreOnLaunch: boolean;
+  restorePromptOnLaunch: boolean;
+  worktreeRecentRepoPaths: string[];
+  worktreeDefaultTargetRef: string;
+} {
   const settingsPath = getSettingsPath();
   try {
     if (fs.existsSync(settingsPath)) {
       const data = fs.readFileSync(settingsPath, 'utf-8');
-      return { sidebarWidth: DEFAULTS.SIDEBAR_WIDTH, groups: [], useWebglRenderer: false, ...JSON.parse(data) };
+      return {
+        sidebarWidth: DEFAULTS.SIDEBAR_WIDTH,
+        groups: [],
+        useWebglRenderer: false,
+        restoreOnLaunch: true,
+        restorePromptOnLaunch: true,
+        worktreeRecentRepoPaths: [],
+        worktreeDefaultTargetRef: 'main',
+        ...JSON.parse(data),
+      };
     }
   } catch (err) {
     console.error('Failed to read settings:', err);
   }
-  return { sidebarWidth: DEFAULTS.SIDEBAR_WIDTH, groups: [], useWebglRenderer: false };
+  return {
+    sidebarWidth: DEFAULTS.SIDEBAR_WIDTH,
+    groups: [],
+    useWebglRenderer: false,
+    restoreOnLaunch: true,
+    restorePromptOnLaunch: true,
+    worktreeRecentRepoPaths: [],
+    worktreeDefaultTargetRef: 'main',
+  };
 }
 
 export function saveSettings(settings: Record<string, any>): void {
@@ -387,4 +417,33 @@ export function saveSettings(settings: Record<string, any>): void {
     fs.mkdirSync(dir, { recursive: true });
   }
   fs.writeFileSync(settingsPath, JSON.stringify(merged, null, 2));
+}
+
+export function getWorkspaceSnapshot(): WorkspaceSnapshotV1 | null {
+  const snapshotPath = getWorkspaceSnapshotPath();
+  try {
+    if (!fs.existsSync(snapshotPath)) return null;
+    const parsed = JSON.parse(fs.readFileSync(snapshotPath, 'utf-8')) as WorkspaceSnapshotV1;
+    if (!parsed || parsed.schemaVersion !== 1 || !Array.isArray(parsed.tabs)) return null;
+    return parsed;
+  } catch (err) {
+    console.error('Failed to read workspace snapshot:', err);
+    return null;
+  }
+}
+
+export function saveWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1): void {
+  const snapshotPath = getWorkspaceSnapshotPath();
+  const dir = path.dirname(snapshotPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  fs.writeFileSync(snapshotPath, JSON.stringify(snapshot, null, 2));
+}
+
+export function clearWorkspaceSnapshot(): void {
+  const snapshotPath = getWorkspaceSnapshotPath();
+  if (fs.existsSync(snapshotPath)) {
+    fs.rmSync(snapshotPath, { force: true });
+  }
 }

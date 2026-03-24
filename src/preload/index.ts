@@ -18,7 +18,7 @@ const api: MultiClaudeAPI = {
     },
   },
   terminal: {
-    spawn: (configId) => ipcRenderer.invoke(IPC.TERMINAL_SPAWN, configId),
+    spawn: (configId, options) => ipcRenderer.invoke(IPC.TERMINAL_SPAWN, configId, options),
     write: (terminalId, data) => ipcRenderer.send(IPC.TERMINAL_WRITE, terminalId, data),
     resize: (terminalId, cols, rows) => ipcRenderer.send(IPC.TERMINAL_RESIZE, terminalId, cols, rows),
     kill: (terminalId) => ipcRenderer.send(IPC.TERMINAL_KILL, terminalId),
@@ -40,7 +40,7 @@ const api: MultiClaudeAPI = {
     getStateSnapshot: () => ipcRenderer.invoke(IPC.TERMINAL_STATE_SNAPSHOT_GET),
   },
   systemTerminal: {
-    open: (configId) => ipcRenderer.invoke(IPC.SYSTEM_TERMINAL_OPEN, configId),
+    open: (configId, options) => ipcRenderer.invoke(IPC.SYSTEM_TERMINAL_OPEN, configId, options),
   },
   contextMenu: {
     show: (terminalId, hasSelection) => ipcRenderer.send(IPC.CONTEXT_MENU_SHOW, terminalId, hasSelection),
@@ -60,6 +60,19 @@ const api: MultiClaudeAPI = {
     },
     getSettings: () => ipcRenderer.invoke(IPC.APP_GET_SETTINGS),
     saveSettings: (settings) => ipcRenderer.invoke(IPC.APP_SAVE_SETTINGS, settings),
+    getWorkspaceSnapshot: () => ipcRenderer.invoke(IPC.APP_WORKSPACE_SNAPSHOT_GET),
+    saveWorkspaceSnapshot: (snapshot) => ipcRenderer.invoke(IPC.APP_WORKSPACE_SNAPSHOT_SAVE, snapshot),
+    clearWorkspaceSnapshot: () => ipcRenderer.invoke(IPC.APP_WORKSPACE_SNAPSHOT_CLEAR),
+    selectDirectory: (defaultPath) => ipcRenderer.invoke(IPC.APP_SELECT_DIRECTORY, defaultPath),
+  },
+  worktree: {
+    list: (repoPath) => ipcRenderer.invoke(IPC.WORKTREE_LIST, repoPath),
+    create: (input) => ipcRenderer.invoke(IPC.WORKTREE_CREATE, input),
+    remove: (input) => ipcRenderer.invoke(IPC.WORKTREE_REMOVE, input),
+    prune: (repoPath) => ipcRenderer.invoke(IPC.WORKTREE_PRUNE, repoPath),
+    status: (worktreePath) => ipcRenderer.invoke(IPC.WORKTREE_STATUS, worktreePath),
+    mergeReadiness: (worktreePath, targetRef) => ipcRenderer.invoke(IPC.WORKTREE_MERGE_READINESS, worktreePath, targetRef),
+    buildMergeTemplate: (input) => ipcRenderer.invoke(IPC.WORKTREE_MERGE_TEMPLATE, input),
   },
   protocol: {
     startSession: (configId, terminalId) => ipcRenderer.invoke(IPC.RUNNER_SESSION_START, configId, terminalId),

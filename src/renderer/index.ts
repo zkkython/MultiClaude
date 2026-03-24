@@ -17,6 +17,9 @@ import {
 import { createWelcomeScreen } from './components/WelcomeScreen.js';
 import { createStatusBar } from './components/StatusBar.js';
 import { showPreferencesEditor } from './components/PreferencesEditor.js';
+import { showPreflightDialog } from './components/PreflightDialog.js';
+import { showWorktreeLauncher } from './components/WorktreeLauncher.js';
+import { collectPreflightIssues, type PreflightCheckResult } from './preflight.js';
 import type {
   ModelConfig,
   RuntimeState,
@@ -26,6 +29,7 @@ import type {
   TerminalTab,
   TabGroup,
   TabGroupPersisted,
+  WorkspaceSnapshotV1,
 } from '../shared/types.js';
 
 // Tab ID -> terminal ID mapping
@@ -37,6 +41,8 @@ const runnerTransportByTab = new Map<string, string>();
 const runnerLastEventByTab = new Map<string, string>();
 let isRefreshingConfigs = false;
 let metricsPollTimer: ReturnType<typeof setInterval> | null = null;
+let workspaceSnapshotSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let isRestoringWorkspace = false;
 
 async function init() {
   // Load settings
@@ -50,6 +56,12 @@ async function init() {
   }));
   setState({ sidebarWidth: settings.sidebarWidth, groups });
   setState({ useWebglRenderer: Boolean(settings.useWebglRenderer) });
+  setState({
+    restoreOnLaunch: settings.restoreOnLaunch !== false,
+    restorePromptOnLaunch: settings.restorePromptOnLaunch !== false,
+    worktreeRecentRepoPaths: settings.worktreeRecentRepoPaths || [],
+    worktreeDefaultTargetRef: settings.worktreeDefaultTargetRef || 'main',
+  });
 
   // Load configs
   const configs = await window.multiclaude.config.getAll();
@@ -91,6 +103,7 @@ async function init() {
     welcomeScreen.style.display = (!hasConfigs && !hasTabs) ? 'flex' : 'none';
     termContainer.style.display = hasTabs ? 'flex' : 'none';
   });
+  subscribe(scheduleWorkspaceSnapshotSave);
 
   // Welcome screen create button
   document.getElementById('welcome-create-btn')?.addEventListener('click', () => {
@@ -159,6 +172,8 @@ async function init() {
       void refreshProtocolMetrics();
     }, 2_000);
   }
+
+  await maybeRestoreWorkspaceOnLaunch();
 }
 
 function handleSidebarAction(action: SidebarAction) {
@@ -173,6 +188,10 @@ function handleSidebarAction(action: SidebarAction) {
     case 'system-terminal':
       setState({ selectedConfigId: action.configId });
       openSystemTerminal(action.configId);
+      break;
+    case 'worktree-terminal':
+      setState({ selectedConfigId: action.configId });
+      openWorktreeLauncher(action.configId);
       break;
     case 'edit-config': {
       const config = getState().configs.find(c => c.id === action.configId);
@@ -191,17 +210,26 @@ function handleSidebarAction(action: SidebarAction) {
   }
 }
 
-async function spawnTerminal(configId: string) {
+interface SpawnTerminalOptions {
+  customName?: string;
+  restoredRuntimeState?: RuntimeState;
+  skipFocus?: boolean;
+  interactivePreflight?: boolean;
+  cwd?: string;
+}
+
+async function spawnTerminal(configId: string, options: SpawnTerminalOptions = {}): Promise<string | null> {
   const config = getState().configs.find(c => c.id === configId);
-  if (!config) return;
-  const launchIssue = getConfigLaunchIssue(config);
-  if (launchIssue) {
-    alert(launchIssue);
-    return;
+  if (!config) return null;
+  const shouldContinue = await runPreflightCheck(config, {
+    interactive: options.interactivePreflight !== false,
+  });
+  if (!shouldContinue) {
+    return null;
   }
 
   try {
-    const { terminalId } = await window.multiclaude.terminal.spawn(configId);
+    const { terminalId } = await window.multiclaude.terminal.spawn(configId, { cwd: options.cwd });
     const tabId = `tab-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     tabToTerminal.set(tabId, terminalId);
@@ -214,6 +242,7 @@ async function spawnTerminal(configId: string) {
       configColor: config.color,
       provider: config.provider,
       status: 'running',
+      customName: options.customName,
     };
 
     addTab(tab);
@@ -221,8 +250,22 @@ async function spawnTerminal(configId: string) {
     // Create terminal view
     const termContainer = document.querySelector('.terminal-container')!;
     createTerminalView(termContainer as HTMLElement, tabId, terminalId, config.color);
-    showTerminal(tabId);
+    if (!options.skipFocus) {
+      showTerminal(tabId);
+    }
     void startRunnerSessionForTab(tabId, config.id, terminalId);
+
+    if (options.restoredRuntimeState && options.restoredRuntimeState !== 'running') {
+      setTabRuntimeState(
+        tabId,
+        buildRuntimeState(
+          options.restoredRuntimeState,
+          'restored from last workspace snapshot',
+          Date.now(),
+          'low',
+        ),
+      );
+    }
 
     void window.multiclaude.terminal.getStateSnapshot()
       .then((snapshot) => {
@@ -234,9 +277,11 @@ async function spawnTerminal(configId: string) {
       .catch((err) => {
         console.warn('Failed to refresh terminal runtime snapshot:', err);
       });
+    return tabId;
   } catch (err) {
     console.error('Failed to spawn terminal:', err);
     alert(`Failed to open terminal: ${formatError(err)}`);
+    return null;
   }
 }
 
@@ -458,6 +503,11 @@ async function handleMenuAction(action: string, payload?: any) {
         openSystemTerminal(state.selectedConfigId);
       }
       break;
+    case 'new-worktree-terminal':
+      if (state.selectedConfigId) {
+        openWorktreeLauncher(state.selectedConfigId);
+      }
+      break;
     case 'close-terminal':
       if (state.activeTabId) {
         handleTabClose(state.activeTabId);
@@ -577,6 +627,9 @@ async function handleMenuAction(action: string, payload?: any) {
     case 'preferences':
       openPreferences();
       break;
+    case 'restore-last-workspace':
+      await restoreWorkspaceFromSnapshot();
+      break;
     case 'auto-group-by-config':
       autoGroupByConfig();
       saveGroupsToSettings();
@@ -609,13 +662,153 @@ function saveGroupsToSettings() {
 function openPreferences() {
   const state = getState();
   showPreferencesEditor(
-    { sidebarWidth: state.sidebarWidth, groups: state.groups, useWebglRenderer: state.useWebglRenderer },
+    {
+      sidebarWidth: state.sidebarWidth,
+      groups: state.groups,
+      useWebglRenderer: state.useWebglRenderer,
+      restoreOnLaunch: state.restoreOnLaunch,
+      restorePromptOnLaunch: state.restorePromptOnLaunch,
+    },
     async (result) => {
-      setState({ useWebglRenderer: result.useWebglRenderer });
-      await window.multiclaude.app.saveSettings({ useWebglRenderer: result.useWebglRenderer });
+      setState({
+        useWebglRenderer: result.useWebglRenderer,
+        restoreOnLaunch: result.restoreOnLaunch,
+        restorePromptOnLaunch: result.restorePromptOnLaunch,
+      });
+      await window.multiclaude.app.saveSettings({
+        useWebglRenderer: result.useWebglRenderer,
+        restoreOnLaunch: result.restoreOnLaunch,
+        restorePromptOnLaunch: result.restorePromptOnLaunch,
+      });
     },
     () => {},
   );
+}
+
+function openWorktreeLauncher(configId: string): void {
+  const config = getState().configs.find(item => item.id === configId);
+  if (!config) return;
+  const state = getState();
+  showWorktreeLauncher({
+    config,
+    initialRepoPath: state.worktreeRecentRepoPaths[0] || '',
+    initialTargetRef: state.worktreeDefaultTargetRef || 'main',
+    onOpenTerminal: (cwd) => {
+      void spawnTerminal(configId, { cwd });
+    },
+    onPersistDefaults: async (repoPath, targetRef) => {
+      const recent = [
+        repoPath,
+        ...getState().worktreeRecentRepoPaths.filter(item => item !== repoPath),
+      ].slice(0, 5);
+      setState({
+        worktreeRecentRepoPaths: recent,
+        worktreeDefaultTargetRef: targetRef || 'main',
+      });
+      await window.multiclaude.app.saveSettings({
+        worktreeRecentRepoPaths: recent,
+        worktreeDefaultTargetRef: targetRef || 'main',
+      });
+    },
+  });
+}
+
+function scheduleWorkspaceSnapshotSave(): void {
+  if (isRestoringWorkspace) return;
+  if (workspaceSnapshotSaveTimer) {
+    clearTimeout(workspaceSnapshotSaveTimer);
+  }
+  workspaceSnapshotSaveTimer = setTimeout(() => {
+    workspaceSnapshotSaveTimer = null;
+    void persistWorkspaceSnapshot();
+  }, 500);
+}
+
+async function persistWorkspaceSnapshot(): Promise<void> {
+  const state = getState();
+  if (state.tabs.length === 0) {
+    await window.multiclaude.app.clearWorkspaceSnapshot();
+    return;
+  }
+
+  const activeTabIndex = Math.max(0, state.tabs.findIndex(tab => tab.id === state.activeTabId));
+  const snapshot: WorkspaceSnapshotV1 = {
+    schemaVersion: 1,
+    savedAt: new Date().toISOString(),
+    activeTabIndex,
+    tabs: state.tabs.map((tab) => ({
+      configId: tab.configId,
+      customName: tab.customName,
+      runtimeState: tab.status === 'exited' ? 'exited' : (getState().runtimeStatesByTabId[tab.id]?.state || 'running'),
+    })),
+  };
+  await window.multiclaude.app.saveWorkspaceSnapshot(snapshot);
+}
+
+async function maybeRestoreWorkspaceOnLaunch(): Promise<void> {
+  const state = getState();
+  if (!state.restoreOnLaunch) return;
+  if (state.tabs.length > 0) return;
+
+  const snapshot = await window.multiclaude.app.getWorkspaceSnapshot();
+  if (!snapshot || snapshot.tabs.length === 0) return;
+
+  if (state.restorePromptOnLaunch) {
+    const shouldRestore = confirm(`Restore ${snapshot.tabs.length} terminal tab(s) from last workspace?`);
+    if (!shouldRestore) return;
+  }
+  await restoreWorkspaceFromSnapshot(snapshot);
+}
+
+async function restoreWorkspaceFromSnapshot(explicitSnapshot?: WorkspaceSnapshotV1 | null): Promise<void> {
+  const snapshot = explicitSnapshot ?? await window.multiclaude.app.getWorkspaceSnapshot();
+  if (!snapshot || snapshot.tabs.length === 0) {
+    alert('No workspace snapshot available.');
+    return;
+  }
+  if (getState().tabs.length > 0 && !confirm('Current workspace has open tabs. Restore from snapshot anyway?')) {
+    return;
+  }
+
+  isRestoringWorkspace = true;
+  const restoredTabIds: string[] = [];
+  const missingConfigIds = new Set<string>();
+  try {
+    for (const tab of getState().tabs.slice()) {
+      handleTabClose(tab.id);
+    }
+
+    for (const tabSnapshot of snapshot.tabs) {
+      if (tabSnapshot.runtimeState === 'exited') continue;
+      const config = getState().configs.find(item => item.id === tabSnapshot.configId);
+      if (!config) {
+        missingConfigIds.add(tabSnapshot.configId);
+        continue;
+      }
+      const restoredTabId = await spawnTerminal(tabSnapshot.configId, {
+        customName: tabSnapshot.customName,
+        restoredRuntimeState: tabSnapshot.runtimeState,
+        skipFocus: true,
+        interactivePreflight: false,
+      });
+      if (restoredTabId) {
+        restoredTabIds.push(restoredTabId);
+      }
+    }
+  } finally {
+    isRestoringWorkspace = false;
+  }
+
+  if (restoredTabIds.length > 0) {
+    const index = Math.max(0, Math.min(snapshot.activeTabIndex, restoredTabIds.length - 1));
+    const tabId = restoredTabIds[index];
+    setActiveTab(tabId);
+    showTerminal(tabId);
+  }
+
+  if (missingConfigIds.size > 0) {
+    alert(`Some tabs were skipped because configs are missing:\n${Array.from(missingConfigIds).join('\n')}`);
+  }
 }
 
 function findTabByTerminalId(terminalId: string): string | undefined {
@@ -639,17 +832,16 @@ function applyRuntimeSnapshot(snapshot: Record<string, TerminalRuntimeState>) {
   }
 }
 
-async function openSystemTerminal(configId: string): Promise<void> {
+async function openSystemTerminal(configId: string, options?: { cwd?: string }): Promise<void> {
   const config = getState().configs.find(c => c.id === configId);
   if (!config) return;
-  const launchIssue = getConfigLaunchIssue(config);
-  if (launchIssue) {
-    alert(launchIssue);
+  const shouldContinue = await runPreflightCheck(config, { interactive: true });
+  if (!shouldContinue) {
     return;
   }
 
   try {
-    await window.multiclaude.systemTerminal.open(configId);
+    await window.multiclaude.systemTerminal.open(configId, options);
   } catch (err) {
     alert(`Failed to open system terminal: ${formatError(err)}`);
   }
@@ -659,24 +851,75 @@ function hasRunningTabsForConfig(configId: string): boolean {
   return getState().tabs.some(tab => tab.configId === configId && tab.status === 'running');
 }
 
-function getConfigLaunchIssue(config: ModelConfig): string | null {
-  const codexApiEnvKey = (config.codexApiKeyEnvKey || 'OPENAI_API_KEY').trim();
-  const customModel = config.provider === 'codex'
-    ? (config.customEnvVars['OPENAI_MODEL'] || '').trim()
-    : (config.customEnvVars['ANTHROPIC_MODEL'] || '').trim();
-  const customKey = config.provider === 'codex'
-    ? ((config.customEnvVars[codexApiEnvKey] || config.customEnvVars['OPENAI_API_KEY'] || '').trim())
-    : (config.customEnvVars['ANTHROPIC_AUTH_TOKEN'] || '').trim();
+async function runPreflightCheck(
+  config: ModelConfig,
+  options: { interactive: boolean },
+): Promise<boolean> {
+  let currentConfig = config;
+  while (true) {
+    currentConfig = getState().configs.find(item => item.id === currentConfig.id) || currentConfig;
+    const result = await collectPreflightCheckResult(currentConfig);
+    if (!options.interactive) {
+      return result.blockers.length === 0;
+    }
+    if (result.blockers.length === 0 && result.warnings.length === 0) {
+      return true;
+    }
 
-  if (config.provider === 'codex') {
-    if (!config.openaiModel.trim() && !customModel) return `Config "${config.name}" is missing OPENAI model.`;
-    if (!config.openaiApiKey.trim() && !customKey) return `Config "${config.name}" is missing OPENAI API key.`;
-    return null;
+    const action = await showPreflightDialog({
+      configName: currentConfig.name,
+      issues: result.issues,
+    });
+    if (action === 'cancel') return false;
+    if (action === 'continue') return true;
+    if (action === 'edit-config') {
+      openConfigEditor(currentConfig);
+      return false;
+    }
+    if (action === 'install-claude-hooks') {
+      try {
+        await window.multiclaude.protocol.installClaudeHooks();
+      } catch (err) {
+        alert(`Failed to install Claude hooks: ${formatError(err)}`);
+        return false;
+      }
+      continue;
+    }
+    if (action === 'set-transport-pty') {
+      await applyConfigEnvPatch(currentConfig, { MC_PROTOCOL_TRANSPORT: '' });
+      continue;
+    }
+    if (action === 'clear-headers-json') {
+      await applyConfigEnvPatch(currentConfig, { MC_PROTOCOL_HEADERS_JSON: '' });
+      continue;
+    }
+  }
+}
+
+async function collectPreflightCheckResult(config: ModelConfig): Promise<PreflightCheckResult> {
+  if (config.provider !== 'claude') {
+    return collectPreflightIssues(config);
   }
 
-  if (!config.anthropicModel.trim() && !customModel) return `Config "${config.name}" is missing Claude model.`;
-  if (!config.anthropicAuthToken.trim() && !customKey) return `Config "${config.name}" is missing Claude auth token.`;
-  return null;
+  try {
+    const status = await window.multiclaude.protocol.getClaudeHooksStatus();
+    return collectPreflightIssues(config, { claudeHooksStatus: status });
+  } catch (err) {
+    return collectPreflightIssues(config, { claudeHooksError: formatError(err) });
+  }
+}
+
+async function applyConfigEnvPatch(config: ModelConfig, patch: Record<string, string>): Promise<void> {
+  const customEnvVars = { ...config.customEnvVars };
+  for (const [key, value] of Object.entries(patch)) {
+    if (!value) {
+      delete customEnvVars[key];
+    } else {
+      customEnvVars[key] = value;
+    }
+  }
+  await window.multiclaude.config.update({ id: config.id, customEnvVars });
+  await refreshConfigs();
 }
 
 function formatError(err: unknown): string {
@@ -696,6 +939,10 @@ subscribe(() => {
     lastFocusedTabId = state.activeTabId;
     showTerminal(state.activeTabId);
   }
+});
+
+window.addEventListener('beforeunload', () => {
+  void persistWorkspaceSnapshot();
 });
 
 init();

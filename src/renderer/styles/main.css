@@ -175,6 +175,7 @@ html, body {
   margin-bottom: 2px;
   position: relative;
   z-index: 0;
+  overflow: visible;
 }
 
 .config-item:hover {
@@ -208,12 +209,43 @@ html, body {
 }
 
 .provider-pill {
-  margin-left: auto;
+  margin-left: 4px;
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 999px;
   border: 1px solid var(--border);
   color: var(--text-dim);
+}
+
+.preflight-pill {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  margin-left: auto;
+}
+
+.preflight-pill.preflight-blocker {
+  background: rgba(243, 139, 168, 0.2);
+  border-color: rgba(243, 139, 168, 0.45);
+  color: var(--red);
+}
+
+.preflight-pill.preflight-warning {
+  background: rgba(249, 226, 175, 0.2);
+  border-color: rgba(249, 226, 175, 0.45);
+  color: var(--yellow);
+}
+
+.preflight-pill.preflight-ok {
+  background: rgba(166, 227, 161, 0.16);
+  border-color: rgba(166, 227, 161, 0.35);
+  color: var(--green);
+}
+
+.preflight-pill.preflight-pending {
+  opacity: 0.8;
 }
 
 .provider-pill.provider-claude {
@@ -252,18 +284,22 @@ html, body {
 
 .config-item-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px;
   padding-top: 8px;
   padding-left: 18px;
+  align-items: center;
   opacity: 0.62;
   pointer-events: none;
   visibility: visible;
   transition: opacity var(--transition);
+  position: relative;
+  min-height: 30px;
 }
 
 .config-item:hover .config-item-actions,
-.config-item.selected .config-item-actions {
+.config-item.selected .config-item-actions,
+.config-item.menu-open .config-item-actions {
   opacity: 1;
   pointer-events: auto;
   visibility: visible;
@@ -321,6 +357,78 @@ html, body {
   background: var(--red);
   border-color: var(--red);
   color: var(--bg-crust);
+}
+
+.action-btn-more {
+  min-width: 30px;
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.config-action-more {
+  position: relative;
+  margin-left: auto;
+}
+
+.config-action-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 160px;
+  display: none;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-mantle);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+  z-index: 100;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+
+.config-action-menu .action-btn {
+  width: 100%;
+  justify-content: flex-start;
+  -webkit-app-region: no-drag;
+}
+
+.config-action-more.is-open .config-action-menu {
+  display: flex;
+}
+
+.delete-confirm-block {
+  display: none;
+  border: 1px solid rgba(243, 139, 168, 0.45);
+  background: rgba(243, 139, 168, 0.12);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  gap: 8px;
+  flex-direction: column;
+}
+
+.config-action-more.delete-armed .delete-confirm-block {
+  display: flex;
+}
+
+.config-action-more.delete-armed [data-delete-arm] {
+  display: none;
+}
+
+.delete-confirm-title {
+  font-size: 11px;
+  color: var(--red);
+  font-weight: 600;
+}
+
+.delete-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 /* ============ Main Area ============ */
@@ -1080,6 +1188,109 @@ html, body {
 
 .input-with-toggle input {
   flex: 1;
+}
+
+.worktree-launcher {
+  width: min(760px, 92vw);
+}
+
+.worktree-tabs {
+  display: inline-flex;
+  background: var(--bg-surface0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  margin-bottom: 14px;
+  gap: 2px;
+}
+
+.worktree-tab {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.worktree-tab:hover {
+  color: var(--text);
+}
+
+.worktree-tab.is-active {
+  background: var(--blue);
+  color: var(--bg-crust);
+}
+
+.worktree-panel {
+  display: block;
+}
+
+.worktree-panel[hidden] {
+  display: none !important;
+}
+
+.worktree-step-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0 0 8px 0;
+}
+
+.worktree-create-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.worktree-merge-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+}
+
+.worktree-list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-crust);
+  max-height: 280px;
+  overflow: auto;
+}
+
+.worktree-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.worktree-row:last-child {
+  border-bottom: none;
+}
+
+.worktree-meta {
+  min-width: 0;
+  flex: 1;
+}
+
+.worktree-meta > div {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.worktree-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 900px) {
+  .worktree-create-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .color-picker {

@@ -13,9 +13,25 @@ import { ProtocolRunnerBridge } from './protocol-runner-bridge.js';
 import type { RunnerEvent, RunnerUserInput } from '../shared/types.js';
 import type { ProtocolConnectivityCheckInput, ProtocolConnectivityCheckResult } from '../shared/types.js';
 import type { ClaudeHooksStatus } from '../shared/types.js';
+import type {
+  TerminalSpawnOptions,
+  SystemTerminalOpenOptions,
+  WorktreeCreateInput,
+  WorktreeMergeTemplateInput,
+  WorktreeRemoveInput,
+} from '../shared/types.js';
 import { RunnerOrchestrator } from './runner-orchestrator.js';
 import { createSessionTransport, inferHttpSseDefaultsFromInput } from './runner-transport-factory.js';
 import { RunnerSidechannelGateway } from './runner-sidechannel-gateway.js';
+import {
+  buildMergeTemplate,
+  createWorktree,
+  getMergeReadiness,
+  getWorktreeStatus,
+  listWorktrees,
+  pruneWorktrees,
+  removeWorktree,
+} from './worktree-service.js';
 
 let nanoid: (size?: number) => string;
 const agentStateEngine = new AgentStateEngine();
@@ -123,7 +139,7 @@ export function registerIpcHandlers(): void {
   });
 
   // Terminal handlers
-  ipcMain.handle(IPC.TERMINAL_SPAWN, async (_event, configId: string) => {
+  ipcMain.handle(IPC.TERMINAL_SPAWN, async (_event, configId: string, options?: TerminalSpawnOptions) => {
     await ensureNanoid();
     const config = configStore.getConfigById(configId);
     if (!config) {
@@ -166,7 +182,8 @@ export function registerIpcHandlers(): void {
         runnerOrchestrator.cleanupTerminal(terminalId);
         runnerSidechannelGateway.cleanupTerminal(terminalId);
         notifyTerminalExit(terminalId, code);
-      }
+      },
+      options,
     );
 
     return { terminalId };
@@ -251,12 +268,12 @@ export function registerIpcHandlers(): void {
   });
 
   // System terminal
-  ipcMain.handle(IPC.SYSTEM_TERMINAL_OPEN, async (_event, configId: string) => {
+  ipcMain.handle(IPC.SYSTEM_TERMINAL_OPEN, async (_event, configId: string, options?: SystemTerminalOpenOptions) => {
     const config = configStore.getConfigById(configId);
     if (!config) {
       throw new Error(`Config not found: ${configId}`);
     }
-    await openSystemTerminal(config);
+    await openSystemTerminal(config, options);
   });
 
   // Context menu
@@ -301,6 +318,57 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.APP_SAVE_SETTINGS, (_event, settings) => {
     configStore.saveSettings(settings);
+  });
+
+  ipcMain.handle(IPC.APP_WORKSPACE_SNAPSHOT_GET, () => {
+    return configStore.getWorkspaceSnapshot();
+  });
+
+  ipcMain.handle(IPC.APP_WORKSPACE_SNAPSHOT_SAVE, (_event, snapshot) => {
+    configStore.saveWorkspaceSnapshot(snapshot);
+  });
+
+  ipcMain.handle(IPC.APP_WORKSPACE_SNAPSHOT_CLEAR, () => {
+    configStore.clearWorkspaceSnapshot();
+  });
+
+  ipcMain.handle(IPC.APP_SELECT_DIRECTORY, async (_event, defaultPath?: string) => {
+    const win = BrowserWindow.getFocusedWindow();
+    if (!win) return null;
+    const result = await dialog.showOpenDialog(win, {
+      properties: ['openDirectory'],
+      defaultPath: defaultPath && defaultPath.trim() ? defaultPath : undefined,
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+  });
+
+  ipcMain.handle(IPC.WORKTREE_LIST, async (_event, repoPath: string) => {
+    return await listWorktrees(repoPath);
+  });
+
+  ipcMain.handle(IPC.WORKTREE_CREATE, async (_event, input: WorktreeCreateInput) => {
+    return await createWorktree(input);
+  });
+
+  ipcMain.handle(IPC.WORKTREE_REMOVE, async (_event, input: WorktreeRemoveInput) => {
+    await removeWorktree(input.repoPath, input.worktreePath);
+  });
+
+  ipcMain.handle(IPC.WORKTREE_PRUNE, async (_event, repoPath: string) => {
+    await pruneWorktrees(repoPath);
+  });
+
+  ipcMain.handle(IPC.WORKTREE_STATUS, async (_event, worktreePath: string) => {
+    return await getWorktreeStatus(worktreePath);
+  });
+
+  ipcMain.handle(IPC.WORKTREE_MERGE_READINESS, async (_event, worktreePath: string, targetRef: string) => {
+    return await getMergeReadiness(worktreePath, targetRef);
+  });
+
+  ipcMain.handle(IPC.WORKTREE_MERGE_TEMPLATE, async (_event, input: WorktreeMergeTemplateInput) => {
+    return buildMergeTemplate(input);
   });
 }
 

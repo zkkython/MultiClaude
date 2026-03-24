@@ -1,15 +1,58 @@
 import { getState, setState, subscribe } from '../state/store.js';
 import { DEFAULTS } from '../../shared/constants.js';
 import type { ModelConfig } from '../../shared/types.js';
+import { collectPreflightIssues } from '../preflight.js';
 
 export type SidebarAction =
   | { type: 'new-terminal'; configId: string }
+  | { type: 'worktree-terminal'; configId: string }
   | { type: 'system-terminal'; configId: string }
   | { type: 'edit-config'; configId: string }
   | { type: 'duplicate-config'; configId: string }
   | { type: 'delete-config'; configId: string }
   | { type: 'new-config' }
   | { type: 'select-config'; configId: string };
+
+export function buildConfigActionsMarkup(configId: string): string {
+  return `
+    <button class="action-btn action-btn-primary" data-action="new-terminal" data-config-id="${configId}" title="Open embedded terminal">
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M6 3.5a.5.5 0 0 1 .5.3l4 6a.5.5 0 0 1-.4.7H2a.5.5 0 0 1-.4-.8l4-6a.5.5 0 0 1 .4-.2z" transform="rotate(90 8 8)"/></svg>
+      Terminal
+    </button>
+    <button class="action-btn" data-action="worktree-terminal" data-config-id="${configId}" title="Create/open git worktree terminal">
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M2 2h5v2H4v3H2V2zm12 0v5h-2V4h-3V2h5zM2 14v-5h2v3h3v2H2zm12-5v5h-5v-2h3V9h2zM6 6h4v4H6V6z"/></svg>
+      Worktree
+    </button>
+    <div class="config-action-more" data-more-root>
+      <button class="action-btn action-btn-more" data-more-toggle title="More actions">⋯</button>
+      <div class="config-action-menu" data-more-menu>
+        <button class="action-btn" data-action="system-terminal" data-config-id="${configId}" title="Open in system terminal">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M2 3h12v10H2V3zm1 1v8h10V4H3zm1.5 1.5l3 2.5-3 2.5V5.5zM8 11h4v1H8v-1z"/></svg>
+          System
+        </button>
+        <button class="action-btn" data-action="edit-config" data-config-id="${configId}" title="Edit configuration">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M12.1 1.3a1 1 0 0 1 1.4 0l1.2 1.2a1 1 0 0 1 0 1.4L5.8 12.8l-3.5.9.9-3.5 8.9-8.9zM11 3.4L4 10.4l-.5 2.1 2.1-.5 7-7L11 3.4z"/></svg>
+          Edit
+        </button>
+        <button class="action-btn" data-action="duplicate-config" data-config-id="${configId}" title="Duplicate configuration">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm0 1.5a.5.5 0 0 0-.5.5v7a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5V4a.5.5 0 0 0-.5-.5H4z"/><path d="M6 0h7a3 3 0 0 1 3 3v7a1 1 0 0 1-2 0V3a1 1 0 0 0-1-1H6a1 1 0 0 1 0-2z" opacity="0.5"/></svg>
+          Copy
+        </button>
+        <button class="action-btn action-btn-danger" data-delete-arm data-config-id="${configId}" title="Delete configuration">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 1a.5.5 0 0 1 .5-.5h4a.5.5 0 0 1 .5.5V2h3a.5.5 0 0 1 0 1H2.5a.5.5 0 0 1 0-1h3V1zM3 5v8.5A1.5 1.5 0 0 0 4.5 15h7a1.5 1.5 0 0 0 1.5-1.5V5H3zm3 1.5v6a.5.5 0 0 1-1 0v-6a.5.5 0 0 1 1 0zm3 0v6a.5.5 0 0 1-1 0v-6a.5.5 0 0 1 1 0zm3 0v6a.5.5 0 0 1-1 0v-6a.5.5 0 0 1 1 0z"/></svg>
+          Delete…
+        </button>
+        <div class="delete-confirm-block" data-delete-confirm>
+          <div class="delete-confirm-title">Delete config permanently?</div>
+          <div class="delete-confirm-actions">
+            <button class="action-btn" data-delete-cancel>Cancel</button>
+            <button class="action-btn action-btn-danger" data-action="delete-config" data-config-id="${configId}">Delete</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
 
 export function createSidebar(onAction: (action: SidebarAction) => void): HTMLElement {
   const sidebar = document.createElement('div');
@@ -33,6 +76,8 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
   let prevSelectedConfigId: string | null = null;
   let prevSearchQuery = '';
   let prevSidebarWidth = -1;
+  let preflightRefreshSeq = 0;
+  const preflightByConfigId = new Map<string, { level: 'ok' | 'warning' | 'blocker'; title: string }>();
 
   function render() {
     const state = getState();
@@ -57,7 +102,7 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
           <div class="config-list-empty">
             ${state.searchQuery ? 'No matching configs' : 'No configs yet'}
           </div>
-        ` : filteredConfigs.map(config => renderConfigItem(config, state.selectedConfigId)).join('')}
+        ` : filteredConfigs.map(config => renderConfigItem(config, state.selectedConfigId, preflightByConfigId.get(config.id))).join('')}
       </div>
     `;
 
@@ -94,7 +139,44 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
         e.stopPropagation();
         const action = (btn as HTMLElement).dataset.action!;
         const configId = (btn as HTMLElement).dataset.configId!;
+        closeAllMoreMenus();
         onAction({ type: action as any, configId });
+      });
+    });
+
+    content.querySelectorAll('[data-more-root]').forEach((root) => {
+      root.addEventListener('click', (e) => {
+        e.stopPropagation();
+      });
+    });
+    content.querySelectorAll('[data-more-toggle]').forEach((toggle) => {
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const root = (toggle as HTMLElement).closest('[data-more-root]') as HTMLElement | null;
+        if (!root) return;
+        const configItem = root.closest('.config-item') as HTMLElement | null;
+        const willOpen = !root.classList.contains('is-open');
+        closeAllMoreMenus();
+        if (willOpen) {
+          root.classList.add('is-open');
+          configItem?.classList.add('menu-open');
+        }
+      });
+    });
+    content.querySelectorAll('[data-delete-arm]').forEach((armBtn) => {
+      armBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const root = (armBtn as HTMLElement).closest('[data-more-root]') as HTMLElement | null;
+        if (!root) return;
+        root.classList.add('delete-armed');
+      });
+    });
+    content.querySelectorAll('[data-delete-cancel]').forEach((cancelBtn) => {
+      cancelBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const root = (cancelBtn as HTMLElement).closest('[data-more-root]') as HTMLElement | null;
+        if (!root) return;
+        root.classList.remove('delete-armed');
       });
     });
   }
@@ -133,6 +215,13 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
     }
   });
 
+  document.addEventListener('click', () => {
+    closeAllMoreMenus();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeAllMoreMenus();
+  });
+
   subscribe(() => {
     const state = getState();
     const shouldRender = prevConfigsRef !== state.configs
@@ -143,10 +232,14 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
       prevSidebarWidth = state.sidebarWidth;
     }
     if (!shouldRender) return;
+    const configChanged = prevConfigsRef !== state.configs;
     prevConfigsRef = state.configs;
     prevSelectedConfigId = state.selectedConfigId;
     prevSearchQuery = state.searchQuery;
     render();
+    if (configChanged) {
+      void refreshPreflightBadges(state.configs);
+    }
   });
   render();
 
@@ -157,47 +250,99 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
   prevSelectedConfigId = state.selectedConfigId;
   prevSearchQuery = state.searchQuery;
   prevSidebarWidth = state.sidebarWidth;
+  void refreshPreflightBadges(state.configs);
 
   return sidebar;
+
+  async function refreshPreflightBadges(configs: ModelConfig[]): Promise<void> {
+    const seq = ++preflightRefreshSeq;
+    const next = new Map<string, { level: 'ok' | 'warning' | 'blocker'; title: string }>();
+    let claudeHooksStatus: Awaited<ReturnType<typeof window.multiclaude.protocol.getClaudeHooksStatus>> | null = null;
+    let claudeHooksError: string | null = null;
+
+    if (configs.some(config => config.provider === 'claude')) {
+      try {
+        claudeHooksStatus = await window.multiclaude.protocol.getClaudeHooksStatus();
+      } catch (err) {
+        claudeHooksError = formatError(err);
+      }
+    }
+
+    for (const config of configs) {
+      const result = collectPreflightIssues(
+        config,
+        config.provider === 'claude'
+          ? { claudeHooksStatus, claudeHooksError }
+          : undefined
+      );
+      const topIssue = result.issues[0];
+      if (topIssue?.severity === 'blocker') {
+        next.set(config.id, { level: 'blocker', title: topIssue.message });
+        continue;
+      }
+      if (result.warnings.length > 0) {
+        next.set(config.id, { level: 'warning', title: result.warnings[0] });
+        continue;
+      }
+      next.set(config.id, { level: 'ok', title: 'Preflight check passed' });
+    }
+
+    if (seq !== preflightRefreshSeq) return;
+    const changed = configs.some(config => {
+      const prev = preflightByConfigId.get(config.id);
+      const curr = next.get(config.id);
+      return !prev || !curr || prev.level !== curr.level || prev.title !== curr.title;
+    }) || preflightByConfigId.size !== next.size;
+    if (!changed) return;
+    preflightByConfigId.clear();
+    for (const [key, value] of next.entries()) {
+      preflightByConfigId.set(key, value);
+    }
+    render();
+  }
+
+  function closeAllMoreMenus(): void {
+    content.querySelectorAll('.config-action-more.is-open').forEach((root) => {
+      root.classList.remove('is-open');
+      root.classList.remove('delete-armed');
+      const configItem = (root as HTMLElement).closest('.config-item') as HTMLElement | null;
+      configItem?.classList.remove('menu-open');
+    });
+  }
 }
 
-function renderConfigItem(config: ModelConfig, selectedId: string | null): string {
+function renderConfigItem(
+  config: ModelConfig,
+  selectedId: string | null,
+  preflight?: { level: 'ok' | 'warning' | 'blocker'; title: string },
+): string {
   const isSelected = config.id === selectedId;
   const providerLabel = config.provider === 'codex' ? 'Codex' : 'Claude';
   const modelSummary = config.provider === 'codex'
     ? (config.openaiModel || 'No model set')
     : (config.anthropicModel || 'No model set');
   const providerClass = config.provider === 'codex' ? 'provider-codex' : 'provider-claude';
+  const preflightClass = preflight ? `preflight-${preflight.level}` : 'preflight-pending';
+  const preflightLabel = preflight?.level === 'blocker'
+    ? 'BLOCK'
+    : preflight?.level === 'warning'
+      ? 'WARN'
+      : preflight?.level === 'ok'
+        ? 'OK'
+        : '...';
+  const preflightTitle = preflight?.title || 'Checking preflight...';
 
   return `
     <div class="config-item ${isSelected ? 'selected' : ''}" data-config-id="${config.id}">
       <div class="config-item-header">
         <span class="config-color-dot" style="background: ${config.color}"></span>
         <span class="config-name">${escapeHtml(config.name)}</span>
+        <span class="preflight-pill ${preflightClass}" title="${escapeHtml(preflightTitle)}">${preflightLabel}</span>
         <span class="provider-pill ${providerClass}">${providerLabel}</span>
       </div>
       <div class="config-item-detail">${escapeHtml(modelSummary)}</div>
       <div class="config-item-actions">
-        <button class="action-btn action-btn-primary" data-action="new-terminal" data-config-id="${config.id}" title="Open embedded terminal">
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M6 3.5a.5.5 0 0 1 .5.3l4 6a.5.5 0 0 1-.4.7H2a.5.5 0 0 1-.4-.8l4-6a.5.5 0 0 1 .4-.2z" transform="rotate(90 8 8)"/></svg>
-          Terminal
-        </button>
-        <button class="action-btn" data-action="system-terminal" data-config-id="${config.id}" title="Open in system terminal">
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M2 3h12v10H2V3zm1 1v8h10V4H3zm1.5 1.5l3 2.5-3 2.5V5.5zM8 11h4v1H8v-1z"/></svg>
-          System
-        </button>
-        <button class="action-btn" data-action="edit-config" data-config-id="${config.id}" title="Edit configuration">
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M12.1 1.3a1 1 0 0 1 1.4 0l1.2 1.2a1 1 0 0 1 0 1.4L5.8 12.8l-3.5.9.9-3.5 8.9-8.9zM11 3.4L4 10.4l-.5 2.1 2.1-.5 7-7L11 3.4z"/></svg>
-          Edit
-        </button>
-        <button class="action-btn" data-action="duplicate-config" data-config-id="${config.id}" title="Duplicate configuration">
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm0 1.5a.5.5 0 0 0-.5.5v7a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5V4a.5.5 0 0 0-.5-.5H4z"/><path d="M6 0h7a3 3 0 0 1 3 3v7a1 1 0 0 1-2 0V3a1 1 0 0 0-1-1H6a1 1 0 0 1 0-2z" opacity="0.5"/></svg>
-          Copy
-        </button>
-        <button class="action-btn action-btn-danger" data-action="delete-config" data-config-id="${config.id}" title="Delete configuration">
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 1a.5.5 0 0 1 .5-.5h4a.5.5 0 0 1 .5.5V2h3a.5.5 0 0 1 0 1H2.5a.5.5 0 0 1 0-1h3V1zM3 5v8.5A1.5 1.5 0 0 0 4.5 15h7a1.5 1.5 0 0 0 1.5-1.5V5H3zm3 1.5v6a.5.5 0 0 1-1 0v-6a.5.5 0 0 1 1 0zm3 0v6a.5.5 0 0 1-1 0v-6a.5.5 0 0 1 1 0zm3 0v6a.5.5 0 0 1-1 0v-6a.5.5 0 0 1 1 0z"/></svg>
-          Delete
-        </button>
+        ${buildConfigActionsMarkup(config.id)}
       </div>
     </div>
   `;
@@ -207,4 +352,9 @@ function escapeHtml(str: string): string {
   const div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
+}
+
+function formatError(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  return String(err);
 }

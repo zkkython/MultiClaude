@@ -99,10 +99,12 @@ export function spawnPty(
   env: Record<string, string>,
   onData: (data: string) => void,
   onExit: (code: number) => void,
+  options?: { cwd?: string },
 ): void {
   const pty = getPty();
   const sanitizedEnv = sanitizeEnv(env);
   const home = os.homedir();
+  const cwd = options?.cwd && options.cwd.trim() ? options.cwd : home;
   const shells = getShellCandidates();
   if (shells.length === 0) {
     throw new Error('No available shell candidates for PTY spawn');
@@ -117,7 +119,7 @@ export function spawnPty(
         name: 'xterm-256color',
         cols: 80,
         rows: 24,
-        cwd: home,
+        cwd,
         env: sanitizedEnv,
       });
       break;

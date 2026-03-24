@@ -19,6 +19,10 @@ export interface AppState {
   searchQuery: string;
   fontSize: number;
   useWebglRenderer: boolean;
+  restoreOnLaunch: boolean;
+  restorePromptOnLaunch: boolean;
+  worktreeRecentRepoPaths: string[];
+  worktreeDefaultTargetRef: string;
   groups: TabGroup[];
   runtimeStatesByTabId: Record<string, TerminalRuntimeState>;
   protocolMetrics: RunnerMetricsSnapshot | null;
@@ -34,6 +38,10 @@ const initialState: AppState = {
   searchQuery: '',
   fontSize: 14,
   useWebglRenderer: false,
+  restoreOnLaunch: true,
+  restorePromptOnLaunch: true,
+  worktreeRecentRepoPaths: [],
+  worktreeDefaultTargetRef: 'main',
   groups: [],
   runtimeStatesByTabId: {},
   protocolMetrics: null,

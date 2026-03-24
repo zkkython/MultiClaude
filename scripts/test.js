@@ -20,12 +20,28 @@ async function run() {
       out: path.join(tmpDir, 'runner-sidechannel-gateway.test.cjs'),
     },
     {
+      entry: path.resolve(__dirname, '../src/main/__tests__/worktree-service.test.ts'),
+      out: path.join(tmpDir, 'worktree-service.test.cjs'),
+    },
+    {
       entry: path.resolve(__dirname, '../src/renderer/__tests__/store.test.ts'),
       out: path.join(tmpDir, 'renderer-store.test.cjs'),
     },
     {
       entry: path.resolve(__dirname, '../src/renderer/__tests__/status-bar.test.ts'),
       out: path.join(tmpDir, 'renderer-status-bar.test.cjs'),
+    },
+    {
+      entry: path.resolve(__dirname, '../src/renderer/__tests__/preflight.test.ts'),
+      out: path.join(tmpDir, 'renderer-preflight.test.cjs'),
+    },
+    {
+      entry: path.resolve(__dirname, '../src/renderer/__tests__/worktree-launcher.test.ts'),
+      out: path.join(tmpDir, 'renderer-worktree-launcher.test.cjs'),
+    },
+    {
+      entry: path.resolve(__dirname, '../src/renderer/__tests__/sidebar-actions.test.ts'),
+      out: path.join(tmpDir, 'renderer-sidebar-actions.test.cjs'),
     },
   ];
 

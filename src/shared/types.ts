@@ -89,6 +89,79 @@ export interface AppSettings {
   sidebarWidth: number;
   groups?: TabGroupPersisted[];
   useWebglRenderer?: boolean;
+  restoreOnLaunch?: boolean;
+  restorePromptOnLaunch?: boolean;
+  worktreeRecentRepoPaths?: string[];
+  worktreeDefaultTargetRef?: string;
+}
+
+export interface WorkspaceSnapshotTab {
+  configId: string;
+  customName?: string;
+  runtimeState: RuntimeState;
+}
+
+export interface WorkspaceSnapshotV1 {
+  schemaVersion: 1;
+  savedAt: string;
+  activeTabIndex: number;
+  tabs: WorkspaceSnapshotTab[];
+}
+
+export interface TerminalSpawnOptions {
+  cwd?: string;
+}
+
+export interface SystemTerminalOpenOptions {
+  cwd?: string;
+}
+
+export interface WorktreeInfo {
+  path: string;
+  branch: string;
+  bare: boolean;
+  detached: boolean;
+  locked: boolean;
+  prunable: boolean;
+  isMain: boolean;
+}
+
+export interface WorktreeStatus {
+  path: string;
+  dirty: boolean;
+}
+
+export interface WorktreeCreateInput {
+  repoPath: string;
+  worktreePath: string;
+  branchName: string;
+  fromRef?: string;
+}
+
+export interface WorktreeRemoveInput {
+  repoPath: string;
+  worktreePath: string;
+}
+
+export interface WorktreeMergeReadiness {
+  worktreePath: string;
+  sourceRef: string;
+  targetRef: string;
+  ahead: number;
+  behind: number;
+  dirty: boolean;
+  confidence: 'high' | 'low';
+}
+
+export interface WorktreeMergeTemplateInput {
+  strategy: 'merge' | 'rebase' | 'squash';
+  sourceRef: string;
+  targetRef: string;
+}
+
+export interface WorktreeMergeTemplateResult {
+  strategy: 'merge' | 'rebase' | 'squash';
+  command: string;
 }
 
 export type RunnerEventType =
@@ -194,7 +267,7 @@ export interface MultiClaudeAPI {
     onChanged(callback: () => void): () => void;
   };
   terminal: {
-    spawn(configId: string): Promise<TerminalSpawnResult>;
+    spawn(configId: string, options?: TerminalSpawnOptions): Promise<TerminalSpawnResult>;
     write(terminalId: string, data: string): void;
     resize(terminalId: string, cols: number, rows: number): void;
     kill(terminalId: string): void;
@@ -204,7 +277,7 @@ export interface MultiClaudeAPI {
     getStateSnapshot(): Promise<Record<string, TerminalRuntimeState>>;
   };
   systemTerminal: {
-    open(configId: string): Promise<void>;
+    open(configId: string, options?: SystemTerminalOpenOptions): Promise<void>;
   };
   contextMenu: {
     show(terminalId: string, hasSelection: boolean): void;
@@ -216,6 +289,19 @@ export interface MultiClaudeAPI {
     onNotification(callback: (title: string, body: string, terminalId?: string) => void): () => void;
     getSettings(): Promise<AppSettings>;
     saveSettings(settings: Partial<AppSettings>): Promise<void>;
+    getWorkspaceSnapshot(): Promise<WorkspaceSnapshotV1 | null>;
+    saveWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1): Promise<void>;
+    clearWorkspaceSnapshot(): Promise<void>;
+    selectDirectory(defaultPath?: string): Promise<string | null>;
+  };
+  worktree: {
+    list(repoPath: string): Promise<WorktreeInfo[]>;
+    create(input: WorktreeCreateInput): Promise<WorktreeInfo>;
+    remove(input: WorktreeRemoveInput): Promise<void>;
+    prune(repoPath: string): Promise<void>;
+    status(worktreePath: string): Promise<WorktreeStatus>;
+    mergeReadiness(worktreePath: string, targetRef: string): Promise<WorktreeMergeReadiness>;
+    buildMergeTemplate(input: WorktreeMergeTemplateInput): Promise<WorktreeMergeTemplateResult>;
   };
   protocol: {
     startSession(configId: string, terminalId?: string): Promise<RunnerStartResult>;
