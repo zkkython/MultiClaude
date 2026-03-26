@@ -1,4 +1,5 @@
 import type { PreflightIssue, PreflightFixAction } from '../preflight.js';
+import { setupDialogA11y } from './modal-a11y.js';
 
 export type PreflightDialogAction =
   | 'cancel'
@@ -57,6 +58,11 @@ export function showPreflightDialog(input: {
   document.body.appendChild(overlay);
 
   return new Promise<PreflightDialogAction>((resolve) => {
+    const teardownDialogA11y = setupDialogA11y({
+      modal,
+      onEscape: () => settle('cancel'),
+    });
+
     const settle = (action: PreflightDialogAction) => {
       cleanup();
       resolve(action);
@@ -70,13 +76,8 @@ export function showPreflightDialog(input: {
     modal.querySelector('#preflight-fix-transport')?.addEventListener('click', () => settle('set-transport-pty'));
     modal.querySelector('#preflight-clear-headers')?.addEventListener('click', () => settle('clear-headers-json'));
 
-    function handleKeydown(e: KeyboardEvent) {
-      if (e.key === 'Escape') settle('cancel');
-    }
-    document.addEventListener('keydown', handleKeydown);
-
     function cleanup() {
-      document.removeEventListener('keydown', handleKeydown);
+      teardownDialogA11y();
       overlay.remove();
     }
   });

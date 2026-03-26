@@ -60,10 +60,8 @@ const api: MultiClaudeAPI = {
     },
     getSettings: () => ipcRenderer.invoke(IPC.APP_GET_SETTINGS),
     saveSettings: (settings) => ipcRenderer.invoke(IPC.APP_SAVE_SETTINGS, settings),
-    getWorkspaceSnapshot: () => ipcRenderer.invoke(IPC.APP_WORKSPACE_SNAPSHOT_GET),
-    saveWorkspaceSnapshot: (snapshot) => ipcRenderer.invoke(IPC.APP_WORKSPACE_SNAPSHOT_SAVE, snapshot),
-    clearWorkspaceSnapshot: () => ipcRenderer.invoke(IPC.APP_WORKSPACE_SNAPSHOT_CLEAR),
     selectDirectory: (defaultPath) => ipcRenderer.invoke(IPC.APP_SELECT_DIRECTORY, defaultPath),
+    setIgnoreMenuShortcuts: (ignore) => ipcRenderer.invoke(IPC.APP_SET_IGNORE_MENU_SHORTCUTS, ignore),
   },
   worktree: {
     list: (repoPath) => ipcRenderer.invoke(IPC.WORKTREE_LIST, repoPath),

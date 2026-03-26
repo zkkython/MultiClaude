@@ -13,6 +13,8 @@ interface TerminalInstance {
 }
 
 const instances = new Map<string, TerminalInstance>();
+let menuShortcutsIgnored = false;
+const FORCE_LINE_NAV_STEPS = 256;
 
 function isWebglOptInEnabled(): boolean {
   return getState().useWebglRenderer;
@@ -108,7 +110,26 @@ export function createTerminalView(
 
   // Wire data to PTY
   terminal.onData((data) => {
-    window.multiclaude.terminal.write(terminalId, data);
+    window.multiclaude.terminal.write(terminalId, normalizeCaretControlNotation(data));
+  });
+
+  // Some host/input stacks can surface Ctrl combinations as caret notation
+  // (e.g. "^A", "^E"). Force canonical control bytes for line navigation keys.
+  terminal.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+    if (event.type !== 'keydown') return true;
+    if (!event.ctrlKey || event.metaKey || event.altKey) return true;
+    const key = event.key.toLowerCase();
+    if (key === 'a') {
+      // Hard fallback: move cursor to start by repeated Left key strokes.
+      window.multiclaude.terminal.write(terminalId, '\x1b[D'.repeat(FORCE_LINE_NAV_STEPS));
+      return false;
+    }
+    if (key === 'e') {
+      // Hard fallback: move cursor to end by repeated Right key strokes.
+      window.multiclaude.terminal.write(terminalId, '\x1b[C'.repeat(FORCE_LINE_NAV_STEPS));
+      return false;
+    }
+    return true;
   });
 
   // Wire resize to PTY
@@ -120,6 +141,19 @@ export function createTerminalView(
   container.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     window.multiclaude.contextMenu.show(terminalId, terminal.hasSelection());
+  });
+
+  // When terminal owns focus, allow shell/CLI shortcuts to pass through instead
+  // of being intercepted by Electron menu accelerators.
+  container.addEventListener('focusin', () => {
+    void setIgnoreMenuShortcuts(true);
+  });
+  container.addEventListener('focusout', () => {
+    requestAnimationFrame(() => {
+      const activeEl = document.activeElement as HTMLElement | null;
+      if (activeEl && container.contains(activeEl)) return;
+      void setIgnoreMenuShortcuts(false);
+    });
   });
 
   instances.set(tabId, { terminal, fitAddon, webglAddon, container, terminalId });
@@ -159,6 +193,9 @@ export function destroyTerminal(tabId: string): void {
     instance.terminal.dispose();
     instance.container.remove();
     instances.delete(tabId);
+    if (instances.size === 0) {
+      void setIgnoreMenuShortcuts(false);
+    }
   }
 }
 
@@ -233,8 +270,41 @@ window.addEventListener('focus', () => {
   repaintVisibleTerminals();
 });
 
+window.addEventListener('blur', () => {
+  void setIgnoreMenuShortcuts(false);
+});
+
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     repaintVisibleTerminals();
+    return;
   }
+  void setIgnoreMenuShortcuts(false);
 });
+
+async function setIgnoreMenuShortcuts(ignore: boolean): Promise<void> {
+  if (menuShortcutsIgnored === ignore) return;
+  menuShortcutsIgnored = ignore;
+  try {
+    await window.multiclaude.app.setIgnoreMenuShortcuts(ignore);
+  } catch (err) {
+    console.warn('Failed to toggle menu shortcut passthrough:', err);
+  }
+}
+
+function normalizeCaretControlNotation(data: string): string {
+  // Conservative fallback: only normalize chunks that are fully composed of
+  // caret-control pairs, e.g. "^A" or "^A^E^A".
+  if (!data || data.length < 2 || data.length % 2 !== 0) return data;
+  if (!/^(?:\^[\x3f\x40-\x5f])+$/.test(data)) return data;
+  let normalized = '';
+  for (let i = 0; i < data.length; i += 2) {
+    const marker = data[i + 1];
+    if (marker === '?') {
+      normalized += '\x7f';
+      continue;
+    }
+    normalized += String.fromCharCode(marker.charCodeAt(0) - 64);
+  }
+  return normalized;
+}

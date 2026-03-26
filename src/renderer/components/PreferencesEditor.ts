@@ -1,9 +1,8 @@
 import type { AppSettings } from '../../shared/types.js';
+import { setupDialogA11y } from './modal-a11y.js';
 
 export interface PreferencesEditorResult {
   useWebglRenderer: boolean;
-  restoreOnLaunch: boolean;
-  restorePromptOnLaunch: boolean;
 }
 
 export function showPreferencesEditor(
@@ -34,20 +33,6 @@ export function showPreferencesEditor(
           </label>
           <div class="form-help">Improves performance on some GPUs, but may cause long-session artifacts. Reopen terminals after changing this option.</div>
         </div>
-        <div class="form-group">
-          <label>
-            <input type="checkbox" id="pref-restore-on-launch" ${settings.restoreOnLaunch !== false ? 'checked' : ''} />
-            Restore last workspace on launch
-          </label>
-          <div class="form-help">Reopens terminal tabs from your previous session using the same configs.</div>
-        </div>
-        <div class="form-group">
-          <label>
-            <input type="checkbox" id="pref-restore-prompt-on-launch" ${settings.restorePromptOnLaunch !== false ? 'checked' : ''} />
-            Ask before restoring workspace
-          </label>
-          <div class="form-help">If enabled, MultiClaude asks for confirmation on startup before restoring tabs.</div>
-        </div>
       </form>
     </div>
     <div class="modal-footer">
@@ -58,16 +43,15 @@ export function showPreferencesEditor(
 
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
+  const teardownDialogA11y = setupDialogA11y({
+    modal,
+    onEscape: () => {
+      cleanup();
+      onCancel();
+    },
+  });
 
   const webglCheckbox = modal.querySelector('#pref-use-webgl-renderer') as HTMLInputElement;
-  const restoreOnLaunchCheckbox = modal.querySelector('#pref-restore-on-launch') as HTMLInputElement;
-  const restorePromptOnLaunchCheckbox = modal.querySelector('#pref-restore-prompt-on-launch') as HTMLInputElement;
-
-  const syncRestorePromptEnabled = () => {
-    restorePromptOnLaunchCheckbox.disabled = !restoreOnLaunchCheckbox.checked;
-  };
-  restoreOnLaunchCheckbox.addEventListener('change', syncRestorePromptEnabled);
-  syncRestorePromptEnabled();
 
   modal.querySelector('.modal-close-btn')!.addEventListener('click', () => {
     cleanup();
@@ -81,22 +65,13 @@ export function showPreferencesEditor(
     cleanup();
     onSave({
       useWebglRenderer: webglCheckbox.checked,
-      restoreOnLaunch: restoreOnLaunchCheckbox.checked,
-      restorePromptOnLaunch: restorePromptOnLaunchCheckbox.checked,
     });
   });
 
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      cleanup();
-      onCancel();
-    }
-  }
-  document.addEventListener('keydown', handleKeydown);
   setTimeout(() => webglCheckbox.focus(), 50);
 
   function cleanup() {
-    document.removeEventListener('keydown', handleKeydown);
+    teardownDialogA11y();
     overlay.remove();
   }
 }

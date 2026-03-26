@@ -89,7 +89,7 @@ function getShellArgs(shell: string): string[] {
   }
   const base = shell.split('/').pop() || shell;
   if (base === 'bash' || base === 'zsh') {
-    return ['-l'];
+    return ['-il'];
   }
   return [];
 }

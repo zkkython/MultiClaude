@@ -26,6 +26,8 @@ export function createTerminalTabs(
   // Inner scrollable container for tabs
   const scrollContainer = document.createElement('div');
   scrollContainer.className = 'tab-bar-scroll';
+  scrollContainer.setAttribute('role', 'tablist');
+  scrollContainer.setAttribute('aria-label', 'Terminal tabs');
   tabBar.appendChild(scrollContainer);
 
   // Drag-to-scroll: click and drag horizontally to scroll the tab bar.
@@ -261,6 +263,11 @@ export function createTerminalTabs(
         if ((e.target as HTMLElement).classList.contains('tab-name-input')) return;
         onTabSelect(tabId);
       });
+      tabEl.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        onTabSelect(tabId);
+      });
       tabEl.querySelector('.tab-close')?.addEventListener('click', (e) => {
         e.stopPropagation();
         onTabClose(tabId);
@@ -313,6 +320,12 @@ export function createTerminalTabs(
       // Click toggle area to collapse/expand
       headerEl.querySelector('.tab-group-toggle')?.addEventListener('click', (e) => {
         e.stopPropagation();
+        toggleGroupCollapse(groupId);
+        onGroupsChanged();
+      });
+      headerEl.querySelector('.tab-group-toggle')?.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
         toggleGroupCollapse(groupId);
         onGroupsChanged();
       });
@@ -738,7 +751,7 @@ function renderGroupHeader(group: TabGroup, waitingCount: number): string {
   const waitingBadge = waitingCount > 0 ? `<span class="tab-group-waiting">W${waitingCount}</span>` : '';
   return `
     <div class="tab-group-header ${waitingCount > 0 ? 'tab-group-header-waiting' : ''}" data-group-id="${group.id}" style="--group-color: ${group.color}">
-      <span class="tab-group-toggle">${toggle}</span>
+      <span class="tab-group-toggle" role="button" tabindex="0" aria-label="Toggle group ${escapeHtml(group.name)}">${toggle}</span>
       <span class="tab-group-name">${escapeHtml(group.name)}</span>
       <span class="tab-group-count">(${group.tabIds.length})</span>
       ${waitingBadge}
@@ -754,7 +767,7 @@ function renderTab(tab: TerminalTab, isActive: boolean): string {
   const waitingBadge = effectiveState === 'waiting' ? '<span class="tab-waiting-badge">waiting</span>' : '';
   const exitedBadge = tab.status === 'exited' ? '<span class="tab-status-badge">exited</span>' : '';
   return `
-    <div class="tab ${isActive ? 'active' : ''} ${statusClass} ${waitingClass}" data-tab-id="${tab.id}" data-runtime-state="${effectiveState}" draggable="true">
+    <div class="tab ${isActive ? 'active' : ''} ${statusClass} ${waitingClass}" data-tab-id="${tab.id}" data-runtime-state="${effectiveState}" draggable="true" role="tab" tabindex="${isActive ? '0' : '-1'}" aria-selected="${isActive ? 'true' : 'false'}" aria-label="${escapeHtml(displayName)}">
       <span class="tab-color" style="background: ${tab.configColor}"></span>
       <span class="tab-name">${escapeHtml(displayName)}</span>
       ${waitingBadge}

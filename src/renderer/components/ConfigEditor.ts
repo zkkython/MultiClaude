@@ -1,5 +1,6 @@
 import type { ConfigProvider, ModelConfig, ModelConfigCreate, ModelConfigUpdate } from '../../shared/types.js';
 import { CONFIG_COLORS, DEFAULTS } from '../../shared/constants.js';
+import { setupDialogA11y } from './modal-a11y.js';
 
 export type ConfigEditorResult = ModelConfigCreate | ModelConfigUpdate;
 
@@ -208,6 +209,13 @@ export function showConfigEditor(
 
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
+  const teardownDialogA11y = setupDialogA11y({
+    modal,
+    onEscape: () => {
+      cleanup();
+      onCancel();
+    },
+  });
 
   let selectedColor = existing?.color || defaultColor;
   let selectedProvider: ConfigProvider = currentProvider;
@@ -438,16 +446,8 @@ export function showConfigEditor(
 
   setTimeout(() => nameInput.focus(), 50);
 
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      cleanup();
-      onCancel();
-    }
-  }
-  document.addEventListener('keydown', handleKeydown);
-
   function cleanup() {
-    document.removeEventListener('keydown', handleKeydown);
+    teardownDialogA11y();
     overlay.remove();
   }
 }

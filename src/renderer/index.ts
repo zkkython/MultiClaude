@@ -29,7 +29,6 @@ import type {
   TerminalTab,
   TabGroup,
   TabGroupPersisted,
-  WorkspaceSnapshotV1,
 } from '../shared/types.js';
 
 // Tab ID -> terminal ID mapping
@@ -41,8 +40,6 @@ const runnerTransportByTab = new Map<string, string>();
 const runnerLastEventByTab = new Map<string, string>();
 let isRefreshingConfigs = false;
 let metricsPollTimer: ReturnType<typeof setInterval> | null = null;
-let workspaceSnapshotSaveTimer: ReturnType<typeof setTimeout> | null = null;
-let isRestoringWorkspace = false;
 
 async function init() {
   // Load settings
@@ -57,8 +54,6 @@ async function init() {
   setState({ sidebarWidth: settings.sidebarWidth, groups });
   setState({ useWebglRenderer: Boolean(settings.useWebglRenderer) });
   setState({
-    restoreOnLaunch: settings.restoreOnLaunch !== false,
-    restorePromptOnLaunch: settings.restorePromptOnLaunch !== false,
     worktreeRecentRepoPaths: settings.worktreeRecentRepoPaths || [],
     worktreeDefaultTargetRef: settings.worktreeDefaultTargetRef || 'main',
   });
@@ -103,8 +98,6 @@ async function init() {
     welcomeScreen.style.display = (!hasConfigs && !hasTabs) ? 'flex' : 'none';
     termContainer.style.display = hasTabs ? 'flex' : 'none';
   });
-  subscribe(scheduleWorkspaceSnapshotSave);
-
   // Welcome screen create button
   document.getElementById('welcome-create-btn')?.addEventListener('click', () => {
     openConfigEditor(null);
@@ -173,7 +166,6 @@ async function init() {
     }, 2_000);
   }
 
-  await maybeRestoreWorkspaceOnLaunch();
 }
 
 function handleSidebarAction(action: SidebarAction) {
@@ -212,7 +204,6 @@ function handleSidebarAction(action: SidebarAction) {
 
 interface SpawnTerminalOptions {
   customName?: string;
-  restoredRuntimeState?: RuntimeState;
   skipFocus?: boolean;
   interactivePreflight?: boolean;
   cwd?: string;
@@ -254,18 +245,6 @@ async function spawnTerminal(configId: string, options: SpawnTerminalOptions = {
       showTerminal(tabId);
     }
     void startRunnerSessionForTab(tabId, config.id, terminalId);
-
-    if (options.restoredRuntimeState && options.restoredRuntimeState !== 'running') {
-      setTabRuntimeState(
-        tabId,
-        buildRuntimeState(
-          options.restoredRuntimeState,
-          'restored from last workspace snapshot',
-          Date.now(),
-          'low',
-        ),
-      );
-    }
 
     void window.multiclaude.terminal.getStateSnapshot()
       .then((snapshot) => {
@@ -627,9 +606,6 @@ async function handleMenuAction(action: string, payload?: any) {
     case 'preferences':
       openPreferences();
       break;
-    case 'restore-last-workspace':
-      await restoreWorkspaceFromSnapshot();
-      break;
     case 'auto-group-by-config':
       autoGroupByConfig();
       saveGroupsToSettings();
@@ -666,19 +642,13 @@ function openPreferences() {
       sidebarWidth: state.sidebarWidth,
       groups: state.groups,
       useWebglRenderer: state.useWebglRenderer,
-      restoreOnLaunch: state.restoreOnLaunch,
-      restorePromptOnLaunch: state.restorePromptOnLaunch,
     },
     async (result) => {
       setState({
         useWebglRenderer: result.useWebglRenderer,
-        restoreOnLaunch: result.restoreOnLaunch,
-        restorePromptOnLaunch: result.restorePromptOnLaunch,
       });
       await window.multiclaude.app.saveSettings({
         useWebglRenderer: result.useWebglRenderer,
-        restoreOnLaunch: result.restoreOnLaunch,
-        restorePromptOnLaunch: result.restorePromptOnLaunch,
       });
     },
     () => {},
@@ -711,104 +681,6 @@ function openWorktreeLauncher(configId: string): void {
       });
     },
   });
-}
-
-function scheduleWorkspaceSnapshotSave(): void {
-  if (isRestoringWorkspace) return;
-  if (workspaceSnapshotSaveTimer) {
-    clearTimeout(workspaceSnapshotSaveTimer);
-  }
-  workspaceSnapshotSaveTimer = setTimeout(() => {
-    workspaceSnapshotSaveTimer = null;
-    void persistWorkspaceSnapshot();
-  }, 500);
-}
-
-async function persistWorkspaceSnapshot(): Promise<void> {
-  const state = getState();
-  if (state.tabs.length === 0) {
-    await window.multiclaude.app.clearWorkspaceSnapshot();
-    return;
-  }
-
-  const activeTabIndex = Math.max(0, state.tabs.findIndex(tab => tab.id === state.activeTabId));
-  const snapshot: WorkspaceSnapshotV1 = {
-    schemaVersion: 1,
-    savedAt: new Date().toISOString(),
-    activeTabIndex,
-    tabs: state.tabs.map((tab) => ({
-      configId: tab.configId,
-      customName: tab.customName,
-      runtimeState: tab.status === 'exited' ? 'exited' : (getState().runtimeStatesByTabId[tab.id]?.state || 'running'),
-    })),
-  };
-  await window.multiclaude.app.saveWorkspaceSnapshot(snapshot);
-}
-
-async function maybeRestoreWorkspaceOnLaunch(): Promise<void> {
-  const state = getState();
-  if (!state.restoreOnLaunch) return;
-  if (state.tabs.length > 0) return;
-
-  const snapshot = await window.multiclaude.app.getWorkspaceSnapshot();
-  if (!snapshot || snapshot.tabs.length === 0) return;
-
-  if (state.restorePromptOnLaunch) {
-    const shouldRestore = confirm(`Restore ${snapshot.tabs.length} terminal tab(s) from last workspace?`);
-    if (!shouldRestore) return;
-  }
-  await restoreWorkspaceFromSnapshot(snapshot);
-}
-
-async function restoreWorkspaceFromSnapshot(explicitSnapshot?: WorkspaceSnapshotV1 | null): Promise<void> {
-  const snapshot = explicitSnapshot ?? await window.multiclaude.app.getWorkspaceSnapshot();
-  if (!snapshot || snapshot.tabs.length === 0) {
-    alert('No workspace snapshot available.');
-    return;
-  }
-  if (getState().tabs.length > 0 && !confirm('Current workspace has open tabs. Restore from snapshot anyway?')) {
-    return;
-  }
-
-  isRestoringWorkspace = true;
-  const restoredTabIds: string[] = [];
-  const missingConfigIds = new Set<string>();
-  try {
-    for (const tab of getState().tabs.slice()) {
-      handleTabClose(tab.id);
-    }
-
-    for (const tabSnapshot of snapshot.tabs) {
-      if (tabSnapshot.runtimeState === 'exited') continue;
-      const config = getState().configs.find(item => item.id === tabSnapshot.configId);
-      if (!config) {
-        missingConfigIds.add(tabSnapshot.configId);
-        continue;
-      }
-      const restoredTabId = await spawnTerminal(tabSnapshot.configId, {
-        customName: tabSnapshot.customName,
-        restoredRuntimeState: tabSnapshot.runtimeState,
-        skipFocus: true,
-        interactivePreflight: false,
-      });
-      if (restoredTabId) {
-        restoredTabIds.push(restoredTabId);
-      }
-    }
-  } finally {
-    isRestoringWorkspace = false;
-  }
-
-  if (restoredTabIds.length > 0) {
-    const index = Math.max(0, Math.min(snapshot.activeTabIndex, restoredTabIds.length - 1));
-    const tabId = restoredTabIds[index];
-    setActiveTab(tabId);
-    showTerminal(tabId);
-  }
-
-  if (missingConfigIds.size > 0) {
-    alert(`Some tabs were skipped because configs are missing:\n${Array.from(missingConfigIds).join('\n')}`);
-  }
 }
 
 function findTabByTerminalId(terminalId: string): string | undefined {
@@ -939,10 +811,6 @@ subscribe(() => {
     lastFocusedTabId = state.activeTabId;
     showTerminal(state.activeTabId);
   }
-});
-
-window.addEventListener('beforeunload', () => {
-  void persistWorkspaceSnapshot();
 });
 
 init();

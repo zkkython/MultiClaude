@@ -19,8 +19,6 @@ export interface AppState {
   searchQuery: string;
   fontSize: number;
   useWebglRenderer: boolean;
-  restoreOnLaunch: boolean;
-  restorePromptOnLaunch: boolean;
   worktreeRecentRepoPaths: string[];
   worktreeDefaultTargetRef: string;
   groups: TabGroup[];
@@ -38,8 +36,6 @@ const initialState: AppState = {
   searchQuery: '',
   fontSize: 14,
   useWebglRenderer: false,
-  restoreOnLaunch: true,
-  restorePromptOnLaunch: true,
   worktreeRecentRepoPaths: [],
   worktreeDefaultTargetRef: 'main',
   groups: [],

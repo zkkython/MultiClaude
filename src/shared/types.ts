@@ -89,23 +89,8 @@ export interface AppSettings {
   sidebarWidth: number;
   groups?: TabGroupPersisted[];
   useWebglRenderer?: boolean;
-  restoreOnLaunch?: boolean;
-  restorePromptOnLaunch?: boolean;
   worktreeRecentRepoPaths?: string[];
   worktreeDefaultTargetRef?: string;
-}
-
-export interface WorkspaceSnapshotTab {
-  configId: string;
-  customName?: string;
-  runtimeState: RuntimeState;
-}
-
-export interface WorkspaceSnapshotV1 {
-  schemaVersion: 1;
-  savedAt: string;
-  activeTabIndex: number;
-  tabs: WorkspaceSnapshotTab[];
 }
 
 export interface TerminalSpawnOptions {
@@ -289,10 +274,8 @@ export interface MultiClaudeAPI {
     onNotification(callback: (title: string, body: string, terminalId?: string) => void): () => void;
     getSettings(): Promise<AppSettings>;
     saveSettings(settings: Partial<AppSettings>): Promise<void>;
-    getWorkspaceSnapshot(): Promise<WorkspaceSnapshotV1 | null>;
-    saveWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1): Promise<void>;
-    clearWorkspaceSnapshot(): Promise<void>;
     selectDirectory(defaultPath?: string): Promise<string | null>;
+    setIgnoreMenuShortcuts(ignore: boolean): Promise<void>;
   };
   worktree: {
     list(repoPath: string): Promise<WorktreeInfo[]>;

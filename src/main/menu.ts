@@ -133,11 +133,6 @@ export function createAppMenu(): void {
         accelerator: 'CmdOrCtrl+;',
         click: () => sendMenuAction('next-waiting'),
       },
-      {
-        label: 'Restore Last Workspace',
-        accelerator: 'CmdOrCtrl+Shift+R',
-        click: () => sendMenuAction('restore-last-workspace'),
-      },
       { type: 'separator' },
       ...Array.from({ length: 9 }, (_, i) => ({
         label: `Go to Tab ${i + 1}`,

@@ -320,18 +320,6 @@ export function registerIpcHandlers(): void {
     configStore.saveSettings(settings);
   });
 
-  ipcMain.handle(IPC.APP_WORKSPACE_SNAPSHOT_GET, () => {
-    return configStore.getWorkspaceSnapshot();
-  });
-
-  ipcMain.handle(IPC.APP_WORKSPACE_SNAPSHOT_SAVE, (_event, snapshot) => {
-    configStore.saveWorkspaceSnapshot(snapshot);
-  });
-
-  ipcMain.handle(IPC.APP_WORKSPACE_SNAPSHOT_CLEAR, () => {
-    configStore.clearWorkspaceSnapshot();
-  });
-
   ipcMain.handle(IPC.APP_SELECT_DIRECTORY, async (_event, defaultPath?: string) => {
     const win = BrowserWindow.getFocusedWindow();
     if (!win) return null;
@@ -341,6 +329,12 @@ export function registerIpcHandlers(): void {
     });
     if (result.canceled || result.filePaths.length === 0) return null;
     return result.filePaths[0];
+  });
+
+  ipcMain.handle(IPC.APP_SET_IGNORE_MENU_SHORTCUTS, (event, ignore: boolean) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed()) return;
+    win.webContents.setIgnoreMenuShortcuts(Boolean(ignore));
   });
 
   ipcMain.handle(IPC.WORKTREE_LIST, async (_event, repoPath: string) => {

@@ -14,13 +14,13 @@ export function createStatusBar(onNextWaiting: () => void): HTMLElement {
       const effectiveState = getTabEffectiveState(activeTab);
       const statusIcon = effectiveState === 'waiting' ? '◉' : effectiveState === 'running' ? '●' : '○';
       const provider = activeTab.provider === 'codex' ? 'Codex' : 'Claude';
-      statusText = `<span class="status-indicator" style="color: ${activeTab.configColor}">${statusIcon}</span> ${activeTab.configName} · <span class="status-state">${effectiveState}</span> <span class="status-provider">(${provider})</span>`;
+      statusText = `<span class="status-indicator" style="color: ${activeTab.configColor}">${statusIcon}</span> ${escapeHtml(activeTab.configName)} · <span class="status-state">${effectiveState}</span> <span class="status-provider">(${provider})</span>`;
     }
 
     bar.innerHTML = `
       <div class="status-left">${statusText}</div>
       <div class="status-right">
-        <span class="status-waiting ${counts.waiting > 0 ? 'active' : ''}" title="Go to next waiting terminal">W:${counts.waiting}</span>
+        <button class="status-waiting ${counts.waiting > 0 ? 'active' : ''}" type="button" ${counts.waiting > 0 ? '' : 'disabled'} title="Go to next waiting terminal">W:${counts.waiting}</button>
         <span class="status-sep">|</span>
         <span>R:${counts.running}</span>
         <span class="status-sep">|</span>
@@ -32,13 +32,20 @@ export function createStatusBar(onNextWaiting: () => void): HTMLElement {
 
     const waitingEl = bar.querySelector('.status-waiting') as HTMLElement | null;
     if (waitingEl) {
-      waitingEl.onclick = () => {
-        if (counts.waiting > 0) onNextWaiting();
-      };
+      waitingEl.onclick = () => onNextWaiting();
     }
   }
 
   subscribe(render);
   render();
   return bar;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll('\'', '&#39;');
 }

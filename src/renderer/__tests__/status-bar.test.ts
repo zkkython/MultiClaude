@@ -29,8 +29,6 @@ function resetStore(): void {
     searchQuery: '',
     fontSize: 14,
     useWebglRenderer: false,
-    restoreOnLaunch: true,
-    restorePromptOnLaunch: true,
     worktreeRecentRepoPaths: [],
     worktreeDefaultTargetRef: 'main',
     groups: [],

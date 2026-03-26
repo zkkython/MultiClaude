@@ -24,7 +24,7 @@ export function buildConfigActionsMarkup(configId: string): string {
       Worktree
     </button>
     <div class="config-action-more" data-more-root>
-      <button class="action-btn action-btn-more" data-more-toggle title="More actions">⋯</button>
+      <button class="action-btn action-btn-more" data-more-toggle title="More actions (System, Edit, Copy, Delete)" aria-label="More actions: System, Edit, Copy, Delete" aria-haspopup="menu" aria-expanded="false">⋯</button>
       <div class="config-action-menu" data-more-menu>
         <button class="action-btn" data-action="system-terminal" data-config-id="${configId}" title="Open in system terminal">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M2 3h12v10H2V3zm1 1v8h10V4H3zm1.5 1.5l3 2.5-3 2.5V5.5zM8 11h4v1H8v-1z"/></svg>
@@ -77,6 +77,7 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
   let prevSearchQuery = '';
   let prevSidebarWidth = -1;
   let preflightRefreshSeq = 0;
+  let showMoreCoachmark = readMoreCoachmarkFlag();
   const preflightByConfigId = new Map<string, { level: 'ok' | 'warning' | 'blocker'; title: string }>();
 
   function render() {
@@ -102,83 +103,9 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
           <div class="config-list-empty">
             ${state.searchQuery ? 'No matching configs' : 'No configs yet'}
           </div>
-        ` : filteredConfigs.map(config => renderConfigItem(config, state.selectedConfigId, preflightByConfigId.get(config.id))).join('')}
+        ` : filteredConfigs.map(config => renderConfigItem(config, state.selectedConfigId, preflightByConfigId.get(config.id), showMoreCoachmark)).join('')}
       </div>
     `;
-
-    // Bind events
-    const addBtn = content.querySelector('.sidebar-add-btn');
-    addBtn?.addEventListener('click', () => onAction({ type: 'new-config' }));
-
-    const searchInput = content.querySelector('.sidebar-search-input') as HTMLInputElement | null;
-    if (searchInput) {
-      searchInput.addEventListener('input', (e) => {
-        setState({ searchQuery: (e.target as HTMLInputElement).value });
-      });
-      searchInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-          setState({ searchQuery: '' });
-        }
-      });
-    }
-
-    // Config item clicks
-    content.querySelectorAll('.config-item').forEach(item => {
-      const configId = (item as HTMLElement).dataset.configId!;
-      item.addEventListener('click', () => {
-        onAction({ type: 'select-config', configId });
-      });
-      item.addEventListener('dblclick', () => {
-        onAction({ type: 'new-terminal', configId });
-      });
-    });
-
-    // Action buttons
-    content.querySelectorAll('[data-action]').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const action = (btn as HTMLElement).dataset.action!;
-        const configId = (btn as HTMLElement).dataset.configId!;
-        closeAllMoreMenus();
-        onAction({ type: action as any, configId });
-      });
-    });
-
-    content.querySelectorAll('[data-more-root]').forEach((root) => {
-      root.addEventListener('click', (e) => {
-        e.stopPropagation();
-      });
-    });
-    content.querySelectorAll('[data-more-toggle]').forEach((toggle) => {
-      toggle.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const root = (toggle as HTMLElement).closest('[data-more-root]') as HTMLElement | null;
-        if (!root) return;
-        const configItem = root.closest('.config-item') as HTMLElement | null;
-        const willOpen = !root.classList.contains('is-open');
-        closeAllMoreMenus();
-        if (willOpen) {
-          root.classList.add('is-open');
-          configItem?.classList.add('menu-open');
-        }
-      });
-    });
-    content.querySelectorAll('[data-delete-arm]').forEach((armBtn) => {
-      armBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const root = (armBtn as HTMLElement).closest('[data-more-root]') as HTMLElement | null;
-        if (!root) return;
-        root.classList.add('delete-armed');
-      });
-    });
-    content.querySelectorAll('[data-delete-cancel]').forEach((cancelBtn) => {
-      cancelBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const root = (cancelBtn as HTMLElement).closest('[data-more-root]') as HTMLElement | null;
-        if (!root) return;
-        root.classList.remove('delete-armed');
-      });
-    });
   }
 
   // Drag resize logic
@@ -215,11 +142,116 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
     }
   });
 
-  document.addEventListener('click', () => {
-    closeAllMoreMenus();
+  content.addEventListener('input', (e) => {
+    const target = e.target as HTMLElement;
+    if (!(target instanceof HTMLInputElement)) return;
+    if (!target.classList.contains('sidebar-search-input')) return;
+    setState({ searchQuery: target.value });
   });
+
+  content.addEventListener('keydown', (e) => {
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+    if (target.classList.contains('sidebar-search-input') && e.key === 'Escape') {
+      setState({ searchQuery: '' });
+      return;
+    }
+
+    const configItem = target.closest('.config-item') as HTMLElement | null;
+    if (!configItem) return;
+    if (target.closest('[data-action]') || target.closest('[data-more-root]')) return;
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    const configId = configItem.dataset.configId;
+    if (!configId) return;
+    onAction({ type: 'select-config', configId });
+  });
+
+  content.addEventListener('dblclick', (e) => {
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+    if (target.closest('[data-action]') || target.closest('[data-more-root]')) return;
+    const configItem = target.closest('.config-item') as HTMLElement | null;
+    if (!configItem?.dataset.configId) return;
+    onAction({ type: 'new-terminal', configId: configItem.dataset.configId });
+  });
+
+  content.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+
+    if (target.closest('.sidebar-add-btn')) {
+      onAction({ type: 'new-config' });
+      return;
+    }
+
+    const actionButton = target.closest('[data-action]') as HTMLElement | null;
+    if (actionButton?.dataset.action && actionButton.dataset.configId) {
+      closeAllMoreMenus();
+      onAction({ type: actionButton.dataset.action as any, configId: actionButton.dataset.configId });
+      return;
+    }
+
+    const moreToggle = target.closest('[data-more-toggle]') as HTMLElement | null;
+    if (moreToggle) {
+      const root = moreToggle.closest('[data-more-root]') as HTMLElement | null;
+      if (!root) return;
+      const configItem = root.closest('.config-item') as HTMLElement | null;
+      const willOpen = !root.classList.contains('is-open');
+      closeAllMoreMenus();
+      if (willOpen) {
+        if (showMoreCoachmark) {
+          showMoreCoachmark = false;
+          writeMoreCoachmarkFlag();
+          render();
+        }
+        root.classList.add('is-open');
+        configItem?.classList.add('menu-open');
+        moreToggle.setAttribute('aria-expanded', 'true');
+      } else {
+        moreToggle.setAttribute('aria-expanded', 'false');
+      }
+      return;
+    }
+
+    const armDelete = target.closest('[data-delete-arm]') as HTMLElement | null;
+    if (armDelete) {
+      const root = armDelete.closest('[data-more-root]') as HTMLElement | null;
+      if (!root) return;
+      root.classList.add('delete-armed');
+      return;
+    }
+
+    const cancelDelete = target.closest('[data-delete-cancel]') as HTMLElement | null;
+    if (cancelDelete) {
+      const root = cancelDelete.closest('[data-more-root]') as HTMLElement | null;
+      if (!root) return;
+      root.classList.remove('delete-armed');
+      return;
+    }
+
+    if (target.closest('[data-more-root]')) {
+      return;
+    }
+
+    const configItem = target.closest('.config-item') as HTMLElement | null;
+    if (!configItem?.dataset.configId) return;
+    onAction({ type: 'select-config', configId: configItem.dataset.configId });
+  });
+
+  const closeMoreMenusByEvent = (e: Event) => {
+    const target = e.target as HTMLElement | null;
+    if (target?.closest('[data-more-root]')) return;
+    closeAllMoreMenus();
+  };
+  document.addEventListener('pointerdown', closeMoreMenusByEvent, true);
+  document.addEventListener('mousedown', closeMoreMenusByEvent, true);
+  document.addEventListener('click', closeMoreMenusByEvent, true);
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeAllMoreMenus();
+  });
+  window.addEventListener('blur', () => {
+    closeAllMoreMenus();
   });
 
   subscribe(() => {
@@ -307,6 +339,8 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
       root.classList.remove('delete-armed');
       const configItem = (root as HTMLElement).closest('.config-item') as HTMLElement | null;
       configItem?.classList.remove('menu-open');
+      const toggle = (root as HTMLElement).querySelector('[data-more-toggle]') as HTMLElement | null;
+      toggle?.setAttribute('aria-expanded', 'false');
     });
   }
 }
@@ -315,6 +349,7 @@ function renderConfigItem(
   config: ModelConfig,
   selectedId: string | null,
   preflight?: { level: 'ok' | 'warning' | 'blocker'; title: string },
+  showMoreCoachmark?: boolean,
 ): string {
   const isSelected = config.id === selectedId;
   const providerLabel = config.provider === 'codex' ? 'Codex' : 'Claude';
@@ -333,7 +368,14 @@ function renderConfigItem(
   const preflightTitle = preflight?.title || 'Checking preflight...';
 
   return `
-    <div class="config-item ${isSelected ? 'selected' : ''}" data-config-id="${config.id}">
+    <div
+      class="config-item ${isSelected ? 'selected' : ''}"
+      data-config-id="${config.id}"
+      role="button"
+      tabindex="0"
+      aria-label="Select config ${escapeHtml(config.name)}"
+      aria-pressed="${isSelected ? 'true' : 'false'}"
+    >
       <div class="config-item-header">
         <span class="config-color-dot" style="background: ${config.color}"></span>
         <span class="config-name">${escapeHtml(config.name)}</span>
@@ -344,6 +386,7 @@ function renderConfigItem(
       <div class="config-item-actions">
         ${buildConfigActionsMarkup(config.id)}
       </div>
+      <div class="config-actions-hint${showMoreCoachmark ? ' is-coachmark' : ''}">${showMoreCoachmark ? 'Tip: click … once to reveal System/Edit/Copy/Delete.' : 'More menu: System, Edit, Copy, Delete'}</div>
     </div>
   `;
 }
@@ -357,4 +400,20 @@ function escapeHtml(str: string): string {
 function formatError(err: unknown): string {
   if (err instanceof Error && err.message) return err.message;
   return String(err);
+}
+
+function readMoreCoachmarkFlag(): boolean {
+  try {
+    return localStorage.getItem('multiclaude.moreMenuCoachmarkSeen') !== '1';
+  } catch {
+    return true;
+  }
+}
+
+function writeMoreCoachmarkFlag(): void {
+  try {
+    localStorage.setItem('multiclaude.moreMenuCoachmarkSeen', '1');
+  } catch {
+    // Ignore storage write failures.
+  }
 }

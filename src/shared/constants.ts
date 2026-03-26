@@ -39,10 +39,8 @@ export const IPC = {
   APP_NOTIFICATION: 'app:notification',
   APP_GET_SETTINGS: 'app:get-settings',
   APP_SAVE_SETTINGS: 'app:save-settings',
-  APP_WORKSPACE_SNAPSHOT_GET: 'app:workspace-snapshot:get',
-  APP_WORKSPACE_SNAPSHOT_SAVE: 'app:workspace-snapshot:save',
-  APP_WORKSPACE_SNAPSHOT_CLEAR: 'app:workspace-snapshot:clear',
   APP_SELECT_DIRECTORY: 'app:select-directory',
+  APP_SET_IGNORE_MENU_SHORTCUTS: 'app:set-ignore-menu-shortcuts',
 
   WORKTREE_LIST: 'worktree:list',
   WORKTREE_CREATE: 'worktree:create',

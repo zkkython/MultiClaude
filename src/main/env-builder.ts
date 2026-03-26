@@ -120,6 +120,48 @@ if [[ -f ${escapeShellValue(realZdotdir)}/.zshrc ]]; then
 fi
 
 ${exportLines}
+
+# Keep Ctrl+A / Ctrl+E behavior consistent across zsh keymaps.
+if [[ -o interactive ]]; then
+  zmodload -i zsh/terminfo 2>/dev/null || true
+
+  __mc_bind_line_nav_for_map() {
+    local map="$1"
+    bindkey -M "$map" $'\C-A' beginning-of-line 2>/dev/null || true
+    bindkey -M "$map" $'\C-E' end-of-line 2>/dev/null || true
+    bindkey -M "$map" '^A' beginning-of-line 2>/dev/null || true
+    bindkey -M "$map" '^E' end-of-line 2>/dev/null || true
+    bindkey -M "$map" '\e[H' beginning-of-line 2>/dev/null || true
+    bindkey -M "$map" '\e[F' end-of-line 2>/dev/null || true
+    bindkey -M "$map" '\eOH' beginning-of-line 2>/dev/null || true
+    bindkey -M "$map" '\eOF' end-of-line 2>/dev/null || true
+    if [[ -n "\${terminfo[khome]-}" ]]; then
+      bindkey -M "$map" "\${terminfo[khome]}" beginning-of-line 2>/dev/null || true
+    fi
+    if [[ -n "\${terminfo[kend]-}" ]]; then
+      bindkey -M "$map" "\${terminfo[kend]}" end-of-line 2>/dev/null || true
+    fi
+  }
+
+  __mc_rebind_ctrl_line_nav() {
+    __mc_bind_line_nav_for_map main
+    __mc_bind_line_nav_for_map emacs
+    __mc_bind_line_nav_for_map viins
+    __mc_bind_line_nav_for_map vicmd
+  }
+
+  __mc_rebind_ctrl_line_nav
+
+  __mc_zle_line_init() { __mc_rebind_ctrl_line_nav; zle reset-prompt; }
+  __mc_zle_keymap_select() { __mc_rebind_ctrl_line_nav; zle reset-prompt; }
+  zle -N zle-line-init __mc_zle_line_init
+  zle -N zle-keymap-select __mc_zle_keymap_select
+
+  autoload -Uz add-zsh-hook 2>/dev/null || true
+  if typeset -f add-zsh-hook >/dev/null 2>&1; then
+    add-zsh-hook precmd __mc_rebind_ctrl_line_nav 2>/dev/null || true
+  fi
+fi
 `;
   fs.writeFileSync(path.join(zdotdir, '.zshrc'), wrapperRc, { mode: 0o600 });
 
