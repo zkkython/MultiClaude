@@ -105,7 +105,7 @@ export interface RunnerEvent {
   provider: ConfigProvider;
   sessionId: string;
   type: RunnerEventType;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface RunnerStartResult {

@@ -6,21 +6,36 @@ const { spawnSync } = require('child_process');
 
 async function run() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'multiclaude-test-'));
-  const outFile = path.join(tmpDir, 'agent-state-engine.test.cjs');
+  const testEntries = [
+    {
+      entry: path.resolve(__dirname, '../src/main/__tests__/agent-state-engine.test.ts'),
+      out: path.join(tmpDir, 'agent-state-engine.test.cjs'),
+    },
+    {
+      entry: path.resolve(__dirname, '../src/main/__tests__/runner-orchestrator.test.ts'),
+      out: path.join(tmpDir, 'runner-orchestrator.test.cjs'),
+    },
+    {
+      entry: path.resolve(__dirname, '../src/main/__tests__/runner-sidechannel-gateway.test.ts'),
+      out: path.join(tmpDir, 'runner-sidechannel-gateway.test.cjs'),
+    },
+  ];
 
   try {
-    await esbuild.build({
-      entryPoints: [path.resolve(__dirname, '../src/main/__tests__/agent-state-engine.test.ts')],
-      outfile: outFile,
-      bundle: true,
-      platform: 'node',
-      format: 'cjs',
-      target: 'node18',
-      sourcemap: 'inline',
-      tsconfig: path.resolve(__dirname, '../tsconfig.json'),
-    });
+    for (const testEntry of testEntries) {
+      await esbuild.build({
+        entryPoints: [testEntry.entry],
+        outfile: testEntry.out,
+        bundle: true,
+        platform: 'node',
+        format: 'cjs',
+        target: 'node18',
+        sourcemap: 'inline',
+        tsconfig: path.resolve(__dirname, '../tsconfig.json'),
+      });
+    }
 
-    const result = spawnSync(process.execPath, ['--test', outFile], {
+    const result = spawnSync(process.execPath, ['--test', ...testEntries.map(item => item.out)], {
       stdio: 'inherit',
       env: process.env,
     });
