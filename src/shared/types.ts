@@ -275,6 +275,8 @@ export interface MultiClaudeAPI {
     getSettings(): Promise<AppSettings>;
     saveSettings(settings: Partial<AppSettings>): Promise<void>;
     selectDirectory(defaultPath?: string): Promise<string | null>;
+    ensureDirectory(path: string): Promise<string>;
+    writeTextFile(path: string, content: string): Promise<string>;
     setIgnoreMenuShortcuts(ignore: boolean): Promise<void>;
   };
   worktree: {

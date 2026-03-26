@@ -61,6 +61,8 @@ const api: MultiClaudeAPI = {
     getSettings: () => ipcRenderer.invoke(IPC.APP_GET_SETTINGS),
     saveSettings: (settings) => ipcRenderer.invoke(IPC.APP_SAVE_SETTINGS, settings),
     selectDirectory: (defaultPath) => ipcRenderer.invoke(IPC.APP_SELECT_DIRECTORY, defaultPath),
+    ensureDirectory: (path) => ipcRenderer.invoke(IPC.APP_ENSURE_DIRECTORY, path),
+    writeTextFile: (path, content) => ipcRenderer.invoke(IPC.APP_WRITE_TEXT_FILE, path, content),
     setIgnoreMenuShortcuts: (ignore) => ipcRenderer.invoke(IPC.APP_SET_IGNORE_MENU_SHORTCUTS, ignore),
   },
   worktree: {

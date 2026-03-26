@@ -331,6 +331,25 @@ export function registerIpcHandlers(): void {
     return result.filePaths[0];
   });
 
+  ipcMain.handle(IPC.APP_ENSURE_DIRECTORY, async (_event, targetPath: string) => {
+    const normalized = String(targetPath || '').trim();
+    if (!normalized) {
+      throw new Error('Directory path is required');
+    }
+    await fs.mkdir(normalized, { recursive: true });
+    return normalized;
+  });
+
+  ipcMain.handle(IPC.APP_WRITE_TEXT_FILE, async (_event, targetPath: string, content: string) => {
+    const normalized = String(targetPath || '').trim();
+    if (!normalized) {
+      throw new Error('File path is required');
+    }
+    await fs.mkdir(path.dirname(normalized), { recursive: true });
+    await fs.writeFile(normalized, String(content ?? ''), 'utf8');
+    return normalized;
+  });
+
   ipcMain.handle(IPC.APP_SET_IGNORE_MENU_SHORTCUTS, (event, ignore: boolean) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win.isDestroyed()) return;

@@ -6,6 +6,7 @@ import { collectPreflightIssues } from '../preflight.js';
 export type SidebarAction =
   | { type: 'new-terminal'; configId: string }
   | { type: 'worktree-terminal'; configId: string }
+  | { type: 'batch-stress'; configId: string }
   | { type: 'system-terminal'; configId: string }
   | { type: 'edit-config'; configId: string }
   | { type: 'duplicate-config'; configId: string }
@@ -24,8 +25,12 @@ export function buildConfigActionsMarkup(configId: string): string {
       Worktree
     </button>
     <div class="config-action-more" data-more-root>
-      <button class="action-btn action-btn-more" data-more-toggle title="More actions (System, Edit, Copy, Delete)" aria-label="More actions: System, Edit, Copy, Delete" aria-haspopup="menu" aria-expanded="false">⋯</button>
+      <button class="action-btn action-btn-more" data-more-toggle title="More actions (Stress, System, Edit, Copy, Delete)" aria-label="More actions: Stress, System, Edit, Copy, Delete" aria-haspopup="menu" aria-expanded="false">⋯</button>
       <div class="config-action-menu" data-more-menu>
+        <button class="action-btn" data-action="batch-stress" data-config-id="${configId}" title="Run batch stress terminals in subdirectories">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M2 2h5v5H2V2zm7 0h5v5H9V2zM2 9h5v5H2V9zm7 2h5v3H9v-3z"/></svg>
+          Stress
+        </button>
         <button class="action-btn" data-action="system-terminal" data-config-id="${configId}" title="Open in system terminal">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M2 3h12v10H2V3zm1 1v8h10V4H3zm1.5 1.5l3 2.5-3 2.5V5.5zM8 11h4v1H8v-1z"/></svg>
           System
@@ -386,7 +391,7 @@ function renderConfigItem(
       <div class="config-item-actions">
         ${buildConfigActionsMarkup(config.id)}
       </div>
-      <div class="config-actions-hint${showMoreCoachmark ? ' is-coachmark' : ''}">${showMoreCoachmark ? 'Tip: click … once to reveal System/Edit/Copy/Delete.' : 'More menu: System, Edit, Copy, Delete'}</div>
+      <div class="config-actions-hint${showMoreCoachmark ? ' is-coachmark' : ''}">${showMoreCoachmark ? 'Tip: click … once to reveal Stress/System/Edit/Copy/Delete.' : 'More menu: Stress, System, Edit, Copy, Delete'}</div>
     </div>
   `;
 }

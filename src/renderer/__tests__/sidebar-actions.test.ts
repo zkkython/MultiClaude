@@ -9,9 +9,10 @@ test('sidebar config actions keep only terminal/worktree inline and move others 
   assert.match(html, /data-action="worktree-terminal"/);
   assert.match(html, /data-more-toggle/);
   assert.match(html, /data-more-menu/);
-  assert.match(html, /aria-label="More actions: System, Edit, Copy, Delete"/);
+  assert.match(html, /aria-label="More actions: Stress, System, Edit, Copy, Delete"/);
 
   const actions = [
+    'batch-stress',
     'system-terminal',
     'edit-config',
     'duplicate-config',

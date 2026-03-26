@@ -19,6 +19,12 @@ import { createStatusBar } from './components/StatusBar.js';
 import { showPreferencesEditor } from './components/PreferencesEditor.js';
 import { showPreflightDialog } from './components/PreflightDialog.js';
 import { showWorktreeLauncher } from './components/WorktreeLauncher.js';
+import {
+  showBatchStressLauncher,
+  type BatchStressInput,
+  type BatchStressProgress,
+  type BatchStressRunHandle,
+} from './components/BatchStressLauncher.js';
 import { collectPreflightIssues, type PreflightCheckResult } from './preflight.js';
 import type {
   ModelConfig,
@@ -40,6 +46,7 @@ const runnerTransportByTab = new Map<string, string>();
 const runnerLastEventByTab = new Map<string, string>();
 let isRefreshingConfigs = false;
 let metricsPollTimer: ReturnType<typeof setInterval> | null = null;
+const terminalOutputBuffers = new Map<string, string>();
 
 async function init() {
   // Load settings
@@ -107,6 +114,7 @@ async function init() {
   window.multiclaude.terminal.onData((terminalId, data) => {
     const tabId = terminalToTab.get(terminalId);
     if (tabId) {
+      appendTerminalOutput(terminalId, data);
       writeToTerminal(tabId, data);
     }
   });
@@ -184,6 +192,10 @@ function handleSidebarAction(action: SidebarAction) {
     case 'worktree-terminal':
       setState({ selectedConfigId: action.configId });
       openWorktreeLauncher(action.configId);
+      break;
+    case 'batch-stress':
+      setState({ selectedConfigId: action.configId });
+      openBatchStressLauncher(action.configId);
       break;
     case 'edit-config': {
       const config = getState().configs.find(c => c.id === action.configId);
@@ -276,6 +288,7 @@ function handleTabClose(tabId: string) {
     window.multiclaude.terminal.kill(terminalId);
     terminalToTab.delete(terminalId);
     tabToTerminal.delete(tabId);
+    terminalOutputBuffers.delete(terminalId);
   }
   removeTabRuntimeState(tabId);
   runnerLastEventByTab.delete(tabId);
@@ -681,6 +694,417 @@ function openWorktreeLauncher(configId: string): void {
       });
     },
   });
+}
+
+interface BatchStressRound {
+  id?: string;
+  prompt: string;
+  waitForRegex?: string;
+  forbidRegex?: string;
+  timeoutSec?: number;
+}
+
+interface BatchStressInstance {
+  index: number;
+  dir: string;
+  tabId: string;
+  terminalId: string;
+  status: 'pending' | 'running' | 'succeeded' | 'failed';
+  failures: string[];
+  marker: string;
+  roundsCompleted: number;
+}
+
+interface BatchStressReport {
+  jobName: string;
+  configId: string;
+  configName: string;
+  rootDir: string;
+  count: number;
+  concurrency: number;
+  startedAt: number;
+  endedAt?: number;
+  pausedTotalMs: number;
+  instances: Array<{
+    index: number;
+    dir: string;
+    status: BatchStressInstance['status'];
+    roundsCompleted: number;
+    failures: string[];
+    marker: string;
+  }>;
+}
+
+function openBatchStressLauncher(configId: string): void {
+  const config = getState().configs.find(item => item.id === configId);
+  if (!config) return;
+  const state = getState();
+  showBatchStressLauncher({
+    config,
+    initialRootDir: state.worktreeRecentRepoPaths[0] || '',
+    onBrowseRoot: async (defaultPath) => {
+      return await window.multiclaude.app.selectDirectory(defaultPath);
+    },
+    onDryRun: (input) => {
+      const rounds = parseBatchStressRounds(input.roundsJson);
+      const lines: string[] = [];
+      lines.push(`# Config: ${config.name}`);
+      lines.push(`# Job: ${input.jobName}`);
+      lines.push(`# Root: ${input.rootDir}`);
+      lines.push(`# Count: ${input.count}, Concurrency: ${input.concurrency}`);
+      for (let i = 1; i <= input.count; i++) {
+        const dir = joinPath(input.rootDir, renderStressTemplate(input.subdirPattern, {
+          index: String(i),
+          configName: config.name,
+          dir: '',
+          round: '1',
+        }));
+        lines.push(`mkdir -p ${dir}`);
+        lines.push(`spawn terminal --cwd ${dir}`);
+        lines.push(input.bootstrapCommand);
+        if (input.enableIsolationCheck) {
+          lines.push(`[isolation] MARK:${input.jobName}-i${i}`);
+        }
+        for (let r = 0; r < rounds.length; r++) {
+          lines.push(`[round ${r + 1}] ${renderStressTemplate(rounds[r].prompt, {
+            index: String(i),
+            configName: config.name,
+            dir,
+            round: String(r + 1),
+          })}`);
+        }
+      }
+      return lines;
+    },
+    onRun: (input, hooks) => runBatchStress(config, input, hooks),
+  });
+}
+
+function runBatchStress(
+  config: ModelConfig,
+  input: BatchStressInput,
+  hooks: { log: (line: string) => void; progress: (stats: BatchStressProgress) => void },
+): BatchStressRunHandle {
+  let paused = false;
+  let pauseStartedAt: number | null = null;
+  let pausedTotalMs = 0;
+  let lastReport: BatchStressReport | null = null;
+  const reportPath = joinPath(input.rootDir, `${input.jobName}.report.json`);
+
+  const controls = {
+    pause: () => {
+      if (paused) return;
+      paused = true;
+      pauseStartedAt = Date.now();
+      hooks.log('[control] paused');
+    },
+    resume: () => {
+      if (!paused) return;
+      paused = false;
+      if (pauseStartedAt) {
+        pausedTotalMs += Date.now() - pauseStartedAt;
+      }
+      pauseStartedAt = null;
+      hooks.log('[control] resumed');
+    },
+    isPaused: () => paused,
+    exportReport: async (): Promise<string> => {
+      if (!lastReport) {
+        throw new Error('Report is not ready yet');
+      }
+      const payload = JSON.stringify(lastReport, null, 2);
+      return await window.multiclaude.app.writeTextFile(reportPath, `${payload}\n`);
+    },
+  };
+
+  const done = (async () => {
+  const rounds = parseBatchStressRounds(input.roundsJson);
+  const instances: BatchStressInstance[] = [];
+
+  hooks.log(`Batch stress start: job=${input.jobName}, config=${config.name}, count=${input.count}, concurrency=${input.concurrency}`);
+  const startedAt = Date.now();
+  for (let i = 1; i <= input.count; i++) {
+    const subdir = renderStressTemplate(input.subdirPattern, {
+      index: String(i),
+      configName: config.name,
+      dir: '',
+      round: '1',
+    });
+    const dir = joinPath(input.rootDir, subdir);
+    await window.multiclaude.app.ensureDirectory(dir);
+    const tabId = await spawnTerminal(config.id, {
+      cwd: dir,
+      skipFocus: true,
+      customName: `stress-${i}`,
+    });
+    if (!tabId) {
+      hooks.log(`[${i}] spawn failed`);
+      continue;
+    }
+    const terminalId = tabToTerminal.get(tabId);
+    if (!terminalId) {
+      hooks.log(`[${i}] terminal mapping missing`);
+      continue;
+    }
+    terminalOutputBuffers.set(terminalId, '');
+    const marker = `${input.jobName}-i${i}`;
+    instances.push({
+      index: i,
+      dir,
+      tabId,
+      terminalId,
+      status: 'pending',
+      failures: [],
+      marker,
+      roundsCompleted: 0,
+    });
+    hooks.log(`[${i}] ready dir=${dir}`);
+  }
+
+  const allMarkers = instances.map(item => item.marker);
+  const workerCount = Math.max(1, Math.min(input.concurrency, instances.length));
+  let cursor = 0;
+  emitStressProgress(instances, hooks.progress);
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (cursor < instances.length) {
+      await waitIfPaused(() => paused);
+      const instance = instances[cursor++];
+      instance.status = 'running';
+      emitStressProgress(instances, hooks.progress);
+      try {
+        hooks.log(`[${instance.index}] bootstrap: ${input.bootstrapCommand}`);
+        window.multiclaude.terminal.write(instance.terminalId, `${input.bootstrapCommand}\r`);
+        await sleep(input.sendDelayMs + 700);
+        if (input.enableIsolationCheck) {
+          const initPrompt = `Stress isolation marker: ${instance.marker}. Reply READY MARK:${instance.marker}. In every following reply include MARK:${instance.marker}.`;
+          const checkpoint = terminalOutputBuffers.get(instance.terminalId)?.length || 0;
+          window.multiclaude.terminal.write(instance.terminalId, `${initPrompt}\r`);
+          const readyOk = await waitForOutputRegex(instance.terminalId, `MARK:${instance.marker}`, 90_000, checkpoint, () => paused, allMarkers, instance.marker);
+          if (!readyOk.ok) {
+            throw new Error(`isolation init failed: ${readyOk.reason}`);
+          }
+        }
+        for (let roundIndex = 0; roundIndex < rounds.length; roundIndex++) {
+          await waitIfPaused(() => paused);
+          const round = rounds[roundIndex];
+          const context = {
+            index: String(instance.index),
+            configName: config.name,
+            dir: instance.dir,
+            round: String(roundIndex + 1),
+          };
+          let prompt = renderStressTemplate(round.prompt, context);
+          if (input.enableIsolationCheck) {
+            prompt = `${prompt}\n\n[must include token] MARK:${instance.marker}`;
+          }
+          hooks.log(`[${instance.index}] round ${roundIndex + 1}/${rounds.length} send`);
+          const checkpoint = terminalOutputBuffers.get(instance.terminalId)?.length || 0;
+          window.multiclaude.terminal.write(instance.terminalId, `${prompt}\r`);
+          await sleep(input.sendDelayMs);
+
+          const timeoutMs = Math.max(1, round.timeoutSec || 90) * 1000;
+          if (round.waitForRegex?.trim()) {
+            const expected = renderStressTemplate(round.waitForRegex, context);
+            const ok = await waitForOutputRegex(
+              instance.terminalId,
+              expected,
+              timeoutMs,
+              checkpoint,
+              () => paused,
+              allMarkers,
+              input.enableIsolationCheck ? instance.marker : undefined,
+            );
+            if (!ok.ok) {
+              throw new Error(`round ${roundIndex + 1} wait failed: ${ok.reason}`);
+            }
+          } else {
+            await waitForOutputRegex(
+              instance.terminalId,
+              '.+',
+              Math.min(timeoutMs, 1200),
+              checkpoint,
+              () => paused,
+              allMarkers,
+              input.enableIsolationCheck ? instance.marker : undefined,
+            );
+          }
+          if (round.forbidRegex?.trim()) {
+            const forbidden = renderStressTemplate(round.forbidRegex, context);
+            const segment = (terminalOutputBuffers.get(instance.terminalId) || '').slice(checkpoint);
+            const forbiddenRe = toRegex(forbidden);
+            if (forbiddenRe.test(segment)) {
+              throw new Error(`round ${roundIndex + 1} forbidden pattern matched`);
+            }
+          }
+          if (input.enableIsolationCheck) {
+            const segment = (terminalOutputBuffers.get(instance.terminalId) || '').slice(checkpoint);
+            const foreign = detectForeignMarker(segment, allMarkers, instance.marker);
+            if (foreign) {
+              throw new Error(`pollution detected: foreign marker ${foreign}`);
+            }
+            if (!new RegExp(`MARK:${escapeRegex(instance.marker)}`, 'm').test(segment)) {
+              throw new Error(`round ${roundIndex + 1} own marker missing`);
+            }
+          }
+          instance.roundsCompleted = roundIndex + 1;
+        }
+        instance.status = 'succeeded';
+        hooks.log(`[${instance.index}] success`);
+      } catch (err) {
+        instance.status = 'failed';
+        const reason = formatError(err);
+        instance.failures.push(reason);
+        hooks.log(`[${instance.index}] failed: ${reason}`);
+      } finally {
+        emitStressProgress(instances, hooks.progress);
+      }
+    }
+  });
+  await Promise.all(workers);
+  if (pauseStartedAt) pausedTotalMs += Date.now() - pauseStartedAt;
+  lastReport = {
+    jobName: input.jobName,
+    configId: config.id,
+    configName: config.name,
+    rootDir: input.rootDir,
+    count: input.count,
+    concurrency: input.concurrency,
+    startedAt,
+    endedAt: Date.now(),
+    pausedTotalMs,
+    instances: instances.map(item => ({
+      index: item.index,
+      dir: item.dir,
+      status: item.status,
+      roundsCompleted: item.roundsCompleted,
+      failures: [...item.failures],
+      marker: item.marker,
+    })),
+  };
+  await controls.exportReport();
+  hooks.log(`report exported: ${reportPath}`);
+  })();
+
+  return { controls, done };
+}
+
+function parseBatchStressRounds(roundsJson: string): BatchStressRound[] {
+  const parsed = JSON.parse(roundsJson);
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new Error('rounds must be a non-empty array');
+  }
+  const rounds: BatchStressRound[] = parsed.map((item, index) => {
+    if (!item || typeof item !== 'object') {
+      throw new Error(`round ${index + 1} is invalid`);
+    }
+    const prompt = String((item as any).prompt || '').trim();
+    if (!prompt) {
+      throw new Error(`round ${index + 1} prompt is required`);
+    }
+    return {
+      id: String((item as any).id || `r${index + 1}`),
+      prompt,
+      waitForRegex: String((item as any).waitForRegex || '').trim() || undefined,
+      forbidRegex: String((item as any).forbidRegex || '').trim() || undefined,
+      timeoutSec: Number((item as any).timeoutSec || 90),
+    };
+  });
+  return rounds;
+}
+
+function renderStressTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\$\{([a-zA-Z0-9_]+)\}/g, (_, key: string) => vars[key] ?? '');
+}
+
+function emitStressProgress(
+  instances: BatchStressInstance[],
+  publish: (stats: BatchStressProgress) => void,
+): void {
+  const total = instances.length;
+  let running = 0;
+  let succeeded = 0;
+  let failed = 0;
+  let pending = 0;
+  for (const item of instances) {
+    if (item.status === 'running') running++;
+    else if (item.status === 'succeeded') succeeded++;
+    else if (item.status === 'failed') failed++;
+    else pending++;
+  }
+  publish({ total, running, succeeded, failed, pending });
+}
+
+async function waitForOutputRegex(
+  terminalId: string,
+  pattern: string,
+  timeoutMs: number,
+  offset: number,
+  isPaused: () => boolean,
+  allMarkers: string[],
+  ownMarker?: string,
+): Promise<{ ok: boolean; reason?: string }> {
+  const re = toRegex(pattern);
+  const start = Date.now();
+  while (Date.now() - start <= timeoutMs) {
+    await waitIfPaused(isPaused);
+    const full = terminalOutputBuffers.get(terminalId) || '';
+    const segment = full.slice(offset);
+    const foreign = ownMarker ? detectForeignMarker(segment, allMarkers, ownMarker) : null;
+    if (foreign) return { ok: false, reason: `foreign marker ${foreign}` };
+    if (re.test(segment)) return { ok: true };
+    await sleep(200);
+  }
+  return { ok: false, reason: 'timeout' };
+}
+
+function toRegex(pattern: string): RegExp {
+  try {
+    return new RegExp(pattern, 'm');
+  } catch (err) {
+    throw new Error(`Invalid regex "${pattern}": ${formatError(err)}`);
+  }
+}
+
+function appendTerminalOutput(terminalId: string, data: string): void {
+  const prev = terminalOutputBuffers.get(terminalId) || '';
+  const plain = stripAnsi(data);
+  const next = `${prev}${plain}`;
+  const max = 80_000;
+  terminalOutputBuffers.set(terminalId, next.length > max ? next.slice(next.length - max) : next);
+}
+
+function stripAnsi(value: string): string {
+  return value.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '');
+}
+
+async function waitIfPaused(isPaused: () => boolean): Promise<void> {
+  while (isPaused()) {
+    await sleep(150);
+  }
+}
+
+function detectForeignMarker(segment: string, allMarkers: string[], ownMarker: string): string | null {
+  for (const marker of allMarkers) {
+    if (marker === ownMarker) continue;
+    if (segment.includes(`MARK:${marker}`)) return marker;
+  }
+  return null;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function joinPath(base: string, segment: string): string {
+  if (!base) return segment;
+  const sep = base.includes('\\') ? '\\' : '/';
+  const cleanBase = base.endsWith('/') || base.endsWith('\\') ? base.slice(0, -1) : base;
+  const cleanSegment = segment.replace(/^[/\\]+/, '');
+  return `${cleanBase}${sep}${cleanSegment}`;
 }
 
 function findTabByTerminalId(terminalId: string): string | undefined {

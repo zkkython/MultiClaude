@@ -40,6 +40,8 @@ export const IPC = {
   APP_GET_SETTINGS: 'app:get-settings',
   APP_SAVE_SETTINGS: 'app:save-settings',
   APP_SELECT_DIRECTORY: 'app:select-directory',
+  APP_ENSURE_DIRECTORY: 'app:ensure-directory',
+  APP_WRITE_TEXT_FILE: 'app:write-text-file',
   APP_SET_IGNORE_MENU_SHORTCUTS: 'app:set-ignore-menu-shortcuts',
 
   WORKTREE_LIST: 'worktree:list',
