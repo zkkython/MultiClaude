@@ -1,6 +1,13 @@
 const { spawn } = require('child_process');
 const path = require('path');
 
+function buildElectronEnv() {
+  const env = { ...process.env, NODE_ENV: 'development' };
+  // Some shells/tools export this, which forces Electron into Node mode.
+  delete env.ELECTRON_RUN_AS_NODE;
+  return env;
+}
+
 // First build, then start electron with watch mode
 async function dev() {
   // Run build in watch mode
@@ -17,7 +24,7 @@ async function dev() {
   const electronProcess = spawn(String(electronPath), [path.resolve(__dirname, '../dist/main/index.js')], {
     stdio: 'inherit',
     cwd: path.resolve(__dirname, '..'),
-    env: { ...process.env, NODE_ENV: 'development' },
+    env: buildElectronEnv(),
   });
 
   electronProcess.on('close', (code) => {

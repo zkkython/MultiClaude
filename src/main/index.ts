@@ -1,4 +1,5 @@
 import { app, BrowserWindow } from 'electron';
+import { spawn } from 'child_process';
 import * as path from 'path';
 import { registerIpcHandlers } from './ipc-handlers.js';
 import { createAppMenu } from './menu.js';
@@ -6,6 +7,32 @@ import { killAllPtys } from './pty-manager.js';
 import { DEFAULTS, IPC } from '../shared/constants.js';
 
 let mainWindow: BrowserWindow | null = null;
+
+function recoverFromElectronRunAsNode(): void {
+  const electronModule = require('electron') as typeof import('electron') | string;
+  const isNodeMode = typeof electronModule === 'string' || !electronModule.app;
+  if (!isNodeMode) {
+    return;
+  }
+
+  const electronBinary = typeof electronModule === 'string' ? electronModule : require('electron');
+  if (typeof electronBinary === 'string') {
+    const env = { ...process.env };
+    delete env.ELECTRON_RUN_AS_NODE;
+    spawn(electronBinary, process.argv.slice(1), {
+      cwd: process.cwd(),
+      stdio: 'inherit',
+      env,
+    });
+    process.exit(0);
+  }
+
+  throw new Error(
+    'Electron is running in Node mode. Please unset ELECTRON_RUN_AS_NODE and retry.',
+  );
+}
+
+recoverFromElectronRunAsNode();
 
 // Set app name so macOS menu bar, Dock, and About dialog show "MultiClaude"
 app.setName('MultiClaude');
