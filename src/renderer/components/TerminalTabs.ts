@@ -10,6 +10,8 @@ let detachGlobalListeners: (() => void) | null = null;
 export function createTerminalTabs(
   onTabSelect: (tabId: string) => void,
   onTabClose: (tabId: string) => void,
+  onCloseOtherTabs: (tabId: string) => void,
+  onCloseAllTabs: () => void,
   onCloseGroupTabs: (groupId: string) => void,
   onGroupsChanged: () => void,
 ): HTMLElement {
@@ -639,6 +641,30 @@ export function createTerminalTabs(
       });
     });
     menu.appendChild(newFromTab);
+
+    const sepAfterGrouping = document.createElement('div');
+    sepAfterGrouping.className = 'tab-context-menu-separator';
+    menu.appendChild(sepAfterGrouping);
+
+    const closeOthersItem = document.createElement('div');
+    closeOthersItem.className = 'tab-context-menu-item';
+    closeOthersItem.textContent = 'Close Other Tabs';
+    closeOthersItem.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      closeContextMenu();
+      onCloseOtherTabs(tabId);
+    });
+    menu.appendChild(closeOthersItem);
+
+    const closeAllItem = document.createElement('div');
+    closeAllItem.className = 'tab-context-menu-item tab-context-menu-item-danger';
+    closeAllItem.textContent = 'Close All Tabs';
+    closeAllItem.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      closeContextMenu();
+      onCloseAllTabs();
+    });
+    menu.appendChild(closeAllItem);
 
     document.body.appendChild(menu);
 

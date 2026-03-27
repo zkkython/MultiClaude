@@ -43,6 +43,10 @@ async function run() {
       entry: path.resolve(__dirname, '../src/renderer/__tests__/sidebar-actions.test.ts'),
       out: path.join(tmpDir, 'renderer-sidebar-actions.test.cjs'),
     },
+    {
+      entry: path.resolve(__dirname, '../src/renderer/__tests__/tab-close-plan.test.ts'),
+      out: path.join(tmpDir, 'renderer-tab-close-plan.test.cjs'),
+    },
   ];
 
   try {

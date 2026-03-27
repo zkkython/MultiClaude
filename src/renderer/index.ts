@@ -25,6 +25,7 @@ import {
   type BatchStressProgress,
   type BatchStressRunHandle,
 } from './components/BatchStressLauncher.js';
+import { getCloseAllTabIds, getCloseOtherTabIds } from './tab-close-plan.js';
 import { collectPreflightIssues, type PreflightCheckResult } from './preflight.js';
 import type {
   ModelConfig,
@@ -80,7 +81,14 @@ async function init() {
   const mainArea = document.createElement('div');
   mainArea.className = 'main-area';
 
-  const tabBar = createTerminalTabs(handleTabSelect, handleTabClose, handleCloseGroupTabs, handleGroupsChanged);
+  const tabBar = createTerminalTabs(
+    handleTabSelect,
+    handleTabClose,
+    handleCloseOtherTabs,
+    handleCloseAllTabs,
+    handleCloseGroupTabs,
+    handleGroupsChanged,
+  );
   const termContainer = createTerminalContainer();
   const welcomeScreen = createWelcomeScreen();
   const statusBar = createStatusBar(() => {
@@ -628,6 +636,28 @@ async function handleMenuAction(action: string, payload?: any) {
 
 function handleCloseGroupTabs(groupId: string) {
   const tabIds = getGroupTabIds(groupId);
+  for (const tabId of tabIds) {
+    handleTabClose(tabId);
+  }
+}
+
+function handleCloseOtherTabs(currentTabId: string) {
+  const tabIdsToClose = getCloseOtherTabIds(
+    getState().tabs.map(tab => tab.id),
+    currentTabId,
+  );
+  for (const tabId of tabIdsToClose) {
+    handleTabClose(tabId);
+  }
+  const state = getState();
+  if (state.tabs.some(tab => tab.id === currentTabId)) {
+    setActiveTab(currentTabId);
+    showTerminal(currentTabId);
+  }
+}
+
+function handleCloseAllTabs() {
+  const tabIds = getCloseAllTabIds(getState().tabs.map(tab => tab.id));
   for (const tabId of tabIds) {
     handleTabClose(tabId);
   }
