@@ -47,6 +47,22 @@ async function run() {
       entry: path.resolve(__dirname, '../src/renderer/__tests__/tab-close-plan.test.ts'),
       out: path.join(tmpDir, 'renderer-tab-close-plan.test.cjs'),
     },
+    {
+      entry: path.resolve(__dirname, '../src/renderer/__tests__/screen-workspace-actions.test.ts'),
+      out: path.join(tmpDir, 'renderer-screen-workspace-actions.test.cjs'),
+    },
+    {
+      entry: path.resolve(__dirname, '../src/renderer/__tests__/terminal-focus-guard.test.ts'),
+      out: path.join(tmpDir, 'renderer-terminal-focus-guard.test.cjs'),
+    },
+    {
+      entry: path.resolve(__dirname, '../src/renderer/__tests__/screen-workspace-ime-interaction.test.ts'),
+      out: path.join(tmpDir, 'renderer-screen-workspace-ime-interaction.test.cjs'),
+    },
+    {
+      entry: path.resolve(__dirname, '../src/renderer/__tests__/screen-workspace-dom-drift.test.ts'),
+      out: path.join(tmpDir, 'renderer-screen-workspace-dom-drift.test.cjs'),
+    },
   ];
 
   try {

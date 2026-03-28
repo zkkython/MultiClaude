@@ -3,6 +3,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { getState } from '../state/store.js';
+import { shouldAutoFocusTerminal } from './terminal-focus-guard.js';
 
 interface TerminalInstance {
   terminal: Terminal;
@@ -116,6 +117,10 @@ export function createTerminalView(
   // Some host/input stacks can surface Ctrl combinations as caret notation
   // (e.g. "^A", "^E"). Force canonical control bytes for line navigation keys.
   terminal.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+    if (event.type === 'keydown' && document.querySelector('.screen-workspace[data-inline-editing="1"]')) {
+      // During inline rename, never let terminal consume keystrokes.
+      return false;
+    }
     if (event.type !== 'keydown') return true;
     if (!event.ctrlKey || event.metaKey || event.altKey) return true;
     const key = event.key.toLowerCase();
@@ -186,6 +191,40 @@ export function showTerminal(tabId: string): void {
   }
 }
 
+export function showTerminals(
+  visibleTabIds: Set<string>,
+  focusedTabId?: string | null,
+  shouldFocus = true,
+): void {
+  for (const [tabId, inst] of instances) {
+    const visible = visibleTabIds.has(tabId);
+    inst.container.style.display = visible ? 'block' : 'none';
+  }
+  if (!focusedTabId) {
+    fitAllTerminals();
+    return;
+  }
+  const focused = instances.get(focusedTabId);
+  if (!focused || focused.container.style.display === 'none') {
+    fitAllTerminals();
+    return;
+  }
+  requestAnimationFrame(() => {
+    focused.fitAddon.fit();
+    if (shouldAutoFocusTerminal(shouldFocus)) {
+      focused.terminal.focus();
+    }
+  });
+}
+
+export function mountTerminalToHost(tabId: string, host: HTMLElement): void {
+  const instance = instances.get(tabId);
+  if (!instance) return;
+  if (instance.container.parentElement !== host) {
+    host.appendChild(instance.container);
+  }
+}
+
 export function destroyTerminal(tabId: string): void {
   const instance = instances.get(tabId);
   if (instance) {
@@ -203,6 +242,16 @@ export function fitAllTerminals(): void {
   for (const inst of instances.values()) {
     if (inst.container.style.display !== 'none') {
       inst.fitAddon.fit();
+    }
+  }
+}
+
+export function blurAllTerminals(): void {
+  for (const inst of instances.values()) {
+    try {
+      inst.terminal.blur();
+    } catch {
+      // noop
     }
   }
 }

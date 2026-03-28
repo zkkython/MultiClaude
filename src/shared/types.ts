@@ -34,12 +34,21 @@ export type ModelConfigUpdate = Partial<ModelConfigCreate> & { id: string };
 
 export interface TerminalTab {
   id: string;
+  terminalId?: string;
   configId: string;
   configName: string;
   configColor: string;
   provider: ConfigProvider;
   status: 'running' | 'exited';
   customName?: string;
+}
+
+export interface ScreenWorkspace {
+  id: string;
+  name: string;
+  tabs: TerminalTab[];
+  activeTabId: string | null;
+  groups: TabGroup[];
 }
 
 export type RuntimeState = 'running' | 'waiting' | 'idle' | 'exited';
@@ -88,6 +97,12 @@ export interface TabGroupPersisted {
 export interface AppSettings {
   sidebarWidth: number;
   groups?: TabGroupPersisted[];
+  screens?: Array<{
+    id: string;
+    name: string;
+  }>;
+  activeScreenId?: string;
+  screenGroups?: Record<string, TabGroupPersisted[]>;
   useWebglRenderer?: boolean;
   worktreeRecentRepoPaths?: string[];
   worktreeDefaultTargetRef?: string;

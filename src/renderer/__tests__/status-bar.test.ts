@@ -86,3 +86,40 @@ test('status bar renders counts with exited precedence over stale runtime state'
     (globalThis as any).document = previousDocument;
   }
 });
+
+test('status bar renders active waiting tab metadata and enables waiting shortcut', () => {
+  resetStore();
+
+  const fakeDocument = {
+    createElement: () => new FakeElement(),
+  } as unknown as Document;
+  const previousDocument = (globalThis as any).document;
+  (globalThis as any).document = fakeDocument;
+
+  try {
+    addTab(makeTab('tab-waiting', 'running'));
+    setState({ activeTabId: 'tab-waiting' });
+    setTabRuntimeState('tab-waiting', {
+      state: 'waiting',
+      confidence: 'high',
+      reason: 'input needed',
+      source: 'explicit',
+      updatedAt: Date.now(),
+    });
+
+    let jumped = 0;
+    const bar = createStatusBar(() => { jumped += 1; });
+    const html = (bar as unknown as FakeElement).innerHTML;
+    assert.match(html, /Config 1/);
+    assert.match(html, /waiting/);
+    assert.match(html, /Codex/);
+    assert.match(html, /W:1/);
+
+    const waitingButton = (bar as unknown as FakeElement).querySelector('.status-waiting');
+    assert.ok(waitingButton?.onclick);
+    waitingButton?.onclick?.call(waitingButton as any, {} as MouseEvent);
+    assert.equal(jumped, 1);
+  } finally {
+    (globalThis as any).document = previousDocument;
+  }
+});

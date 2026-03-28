@@ -2,22 +2,28 @@ import {
   getState, setState, subscribe,
   addTab, removeTab, updateTabStatus, setActiveTab,
   nextTab, prevTab, goToTab,
-  getGroupTabIds, autoGroupByConfig,
+  autoGroupByConfig,
   findNextWaitingTabId, setProtocolMetrics, setTabRuntimeState, removeTabRuntimeState, expandGroupForTab,
+  getAllTabs, getScreens, getTabScreenId, setActiveScreen, setScreenGroups, setScreenLayout, removeScreen, reconcileTabsIntoAssociatedGroups,
 } from './state/store.js';
 import { createSidebar, type SidebarAction } from './components/Sidebar.js';
 import { showConfigEditor, type ConfigEditorResult } from './components/ConfigEditor.js';
-import { createTerminalTabs } from './components/TerminalTabs.js';
+import {
+  createScreenWorkspace,
+  getVisibleTabIdsForScreens,
+  isScreenWorkspaceInlineEditing,
+} from './components/ScreenWorkspace.js';
 import {
   createTerminalContainer, createTerminalView, writeToTerminal,
-  showTerminal, destroyTerminal, fitAllTerminals, clearTerminal,
+  destroyTerminal, fitAllTerminals, clearTerminal,
   selectAllInTerminal, copyFromTerminal, pasteToTerminal, setTerminalFontSize,
-  getTerminalIdForTab,
+  getTerminalIdForTab, mountTerminalToHost, showTerminals, blurAllTerminals,
 } from './components/TerminalView.js';
 import { createWelcomeScreen } from './components/WelcomeScreen.js';
 import { createStatusBar } from './components/StatusBar.js';
 import { showPreferencesEditor } from './components/PreferencesEditor.js';
 import { showPreflightDialog } from './components/PreflightDialog.js';
+import { showScreenCloseDialog } from './components/ScreenCloseDialog.js';
 import { showWorktreeLauncher } from './components/WorktreeLauncher.js';
 import {
   showBatchStressLauncher,
@@ -34,7 +40,6 @@ import type {
   RunnerEvent,
   TerminalRuntimeState,
   TerminalTab,
-  TabGroup,
   TabGroupPersisted,
 } from '../shared/types.js';
 
@@ -48,18 +53,27 @@ const runnerLastEventByTab = new Map<string, string>();
 let isRefreshingConfigs = false;
 let metricsPollTimer: ReturnType<typeof setInterval> | null = null;
 const terminalOutputBuffers = new Map<string, string>();
+const spawnDedupLocks = new Map<string, number>();
 
 async function init() {
   // Load settings
   const settings = await window.multiclaude.app.getSettings();
-  // Restore groups from persisted settings
-  const persistedGroups: TabGroupPersisted[] = settings.groups || [];
-  const groups: TabGroup[] = persistedGroups.map(pg => ({
-    ...pg,
-    collapsed: false,
-    tabIds: [],
-  }));
-  setState({ sidebarWidth: settings.sidebarWidth, groups });
+  const persistedScreens = settings.screens && settings.screens.length > 0
+    ? settings.screens
+    : [{ id: 'screen-a', name: 'Screen A' }];
+  setScreenLayout(persistedScreens, settings.activeScreenId || persistedScreens[0]?.id);
+  const persistedGroupsByScreen = settings.screenGroups || {};
+  for (const screen of persistedScreens) {
+    const persistedGroups: TabGroupPersisted[] = persistedGroupsByScreen[screen.id]
+      || (screen.id === 'screen-a' ? (settings.groups || []) : []);
+    setScreenGroups(screen.id, persistedGroups.map(group => ({
+      ...group,
+      collapsed: false,
+      tabIds: [],
+    })));
+    reconcileTabsIntoAssociatedGroups(screen.id);
+  }
+  setState({ sidebarWidth: settings.sidebarWidth });
   setState({ useWebglRenderer: Boolean(settings.useWebglRenderer) });
   setState({
     worktreeRecentRepoPaths: settings.worktreeRecentRepoPaths || [],
@@ -81,21 +95,20 @@ async function init() {
   const mainArea = document.createElement('div');
   mainArea.className = 'main-area';
 
-  const tabBar = createTerminalTabs(
-    handleTabSelect,
-    handleTabClose,
-    handleCloseOtherTabs,
-    handleCloseAllTabs,
-    handleCloseGroupTabs,
-    handleGroupsChanged,
-  );
+  const workspace = createScreenWorkspace({
+    onTabClose: handleTabClose,
+    onCloseOtherTabs: handleCloseOtherTabs,
+    onCloseAllTabsInScreen: handleCloseAllTabsInScreen,
+    onRemoveScreen: handleRemoveScreen,
+    onLayoutChanged: persistScreenSettings,
+  });
   const termContainer = createTerminalContainer();
   const welcomeScreen = createWelcomeScreen();
   const statusBar = createStatusBar(() => {
     jumpToNextWaiting();
   });
 
-  mainArea.appendChild(tabBar);
+  mainArea.appendChild(workspace);
   mainArea.appendChild(termContainer);
   mainArea.appendChild(welcomeScreen);
 
@@ -107,11 +120,14 @@ async function init() {
   subscribe(() => {
     const state = getState();
     const hasConfigs = state.configs.length > 0;
-    const hasTabs = state.tabs.length > 0;
+    const hasTabs = getAllTabs().length > 0;
 
     sidebar.style.display = state.sidebarVisible ? 'flex' : 'none';
     welcomeScreen.style.display = (!hasConfigs && !hasTabs) ? 'flex' : 'none';
-    termContainer.style.display = hasTabs ? 'flex' : 'none';
+    workspace.style.display = hasTabs ? 'grid' : 'none';
+    // Terminal views are mounted into per-screen hosts; keep staging container hidden.
+    termContainer.style.display = 'none';
+    syncVisibleTerminals(workspace);
   });
   // Welcome screen create button
   document.getElementById('welcome-create-btn')?.addEventListener('click', () => {
@@ -166,6 +182,7 @@ async function init() {
   // Initial visibility
   const state = getState();
   welcomeScreen.style.display = state.configs.length === 0 ? 'flex' : 'none';
+  workspace.style.display = 'none';
   termContainer.style.display = 'none';
 
   try {
@@ -230,6 +247,14 @@ interface SpawnTerminalOptions {
 }
 
 async function spawnTerminal(configId: string, options: SpawnTerminalOptions = {}): Promise<string | null> {
+  const dedupeKey = `${configId}::${options.cwd || ''}::${options.customName || ''}`;
+  const now = Date.now();
+  const lastSpawnAt = spawnDedupLocks.get(dedupeKey) || 0;
+  if (now - lastSpawnAt < 250) {
+    return null;
+  }
+  spawnDedupLocks.set(dedupeKey, now);
+
   const config = getState().configs.find(c => c.id === configId);
   if (!config) return null;
   const shouldContinue = await runPreflightCheck(config, {
@@ -262,8 +287,10 @@ async function spawnTerminal(configId: string, options: SpawnTerminalOptions = {
     const termContainer = document.querySelector('.terminal-container')!;
     createTerminalView(termContainer as HTMLElement, tabId, terminalId, config.color);
     if (!options.skipFocus) {
-      showTerminal(tabId);
+      setActiveTab(tabId);
     }
+    persistScreenSettings();
+    syncVisibleTerminals();
     void startRunnerSessionForTab(tabId, config.id, terminalId);
 
     void window.multiclaude.terminal.getStateSnapshot()
@@ -281,15 +308,22 @@ async function spawnTerminal(configId: string, options: SpawnTerminalOptions = {
     console.error('Failed to spawn terminal:', err);
     alert(`Failed to open terminal: ${formatError(err)}`);
     return null;
+  } finally {
+    const latest = spawnDedupLocks.get(dedupeKey);
+    if (latest && latest === now) {
+      // Keep a short dedupe window for accidental double/duplicate dispatch.
+      setTimeout(() => {
+        if (spawnDedupLocks.get(dedupeKey) === now) {
+          spawnDedupLocks.delete(dedupeKey);
+        }
+      }, 350);
+    }
   }
 }
 
-function handleTabSelect(tabId: string) {
-  setActiveTab(tabId);
-  showTerminal(tabId);
-}
-
-function handleTabClose(tabId: string) {
+function handleTabClose(tabId: string, options: { persist?: boolean; sync?: boolean } = {}) {
+  const persist = options.persist !== false;
+  const sync = options.sync !== false;
   void endRunnerSessionForTab(tabId);
   const terminalId = tabToTerminal.get(tabId);
   if (terminalId) {
@@ -303,12 +337,8 @@ function handleTabClose(tabId: string) {
   runnerTransportByTab.delete(tabId);
   destroyTerminal(tabId);
   removeTab(tabId);
-
-  // Show remaining active tab
-  const state = getState();
-  if (state.activeTabId) {
-    showTerminal(state.activeTabId);
-  }
+  if (persist) persistScreenSettings();
+  if (sync) syncVisibleTerminals();
 }
 
 async function startRunnerSessionForTab(tabId: string, configId: string, terminalId: string): Promise<void> {
@@ -343,7 +373,7 @@ function onRunnerEvent(event: RunnerEvent): void {
   runnerLastEventByTab.set(tabId, event.type);
   if (event.type === 'status.changed') {
     if (event.to === 'fallback_pty') {
-      const tab = getState().tabs.find(t => t.id === tabId);
+      const tab = getAllTabs().find(t => t.id === tabId);
       if (tab) {
         new Notification(tab.configName, {
           body: 'Protocol runner failed and automatically switched back to PTY.',
@@ -472,18 +502,21 @@ async function refreshConfigs() {
     const state = getState();
     const configIds = new Set(configs.map(c => c.id));
     // Clean up associatedConfigIds that no longer exist
-    const groups = state.groups.map(g => ({
-      ...g,
-      associatedConfigIds: g.associatedConfigIds.filter(cid => configIds.has(cid)),
+    const screens = state.screens.map(screen => ({
+      ...screen,
+      groups: screen.groups.map(group => ({
+        ...group,
+        associatedConfigIds: group.associatedConfigIds.filter(cid => configIds.has(cid)),
+      })),
     }));
     setState({
       configs,
-      groups,
+      screens,
       selectedConfigId: state.selectedConfigId && configs.find(c => c.id === state.selectedConfigId)
         ? state.selectedConfigId
         : configs.length > 0 ? configs[0].id : null,
     });
-    saveGroupsToSettings();
+    persistScreenSettings();
   } finally {
     isRefreshingConfigs = false;
   }
@@ -555,15 +588,15 @@ async function handleMenuAction(action: string, payload?: any) {
       break;
     case 'next-tab':
       nextTab();
-      if (getState().activeTabId) showTerminal(getState().activeTabId!);
+      syncVisibleTerminals();
       break;
     case 'prev-tab':
       prevTab();
-      if (getState().activeTabId) showTerminal(getState().activeTabId!);
+      syncVisibleTerminals();
       break;
     case 'go-to-tab':
       goToTab(payload as number);
-      if (getState().activeTabId) showTerminal(getState().activeTabId!);
+      syncVisibleTerminals();
       break;
     case 'next-waiting':
       jumpToNextWaiting();
@@ -616,7 +649,7 @@ async function handleMenuAction(action: string, payload?: any) {
       if (payload) {
         const tabId = findTabByTerminalId(payload);
         if (tabId) {
-          const tab = state.tabs.find(t => t.id === tabId);
+          const tab = getAllTabs().find(t => t.id === tabId);
           if (tab) {
             openSystemTerminal(tab.configId);
           }
@@ -629,15 +662,8 @@ async function handleMenuAction(action: string, payload?: any) {
       break;
     case 'auto-group-by-config':
       autoGroupByConfig();
-      saveGroupsToSettings();
+      persistScreenSettings();
       break;
-  }
-}
-
-function handleCloseGroupTabs(groupId: string) {
-  const tabIds = getGroupTabIds(groupId);
-  for (const tabId of tabIds) {
-    handleTabClose(tabId);
   }
 }
 
@@ -649,33 +675,88 @@ function handleCloseOtherTabs(currentTabId: string) {
   for (const tabId of tabIdsToClose) {
     handleTabClose(tabId);
   }
-  const state = getState();
-  if (state.tabs.some(tab => tab.id === currentTabId)) {
+  const tabs = getState().tabs;
+  if (tabs.some(tab => tab.id === currentTabId)) {
     setActiveTab(currentTabId);
-    showTerminal(currentTabId);
   }
+  syncVisibleTerminals();
 }
 
-function handleCloseAllTabs() {
-  const tabIds = getCloseAllTabIds(getState().tabs.map(tab => tab.id));
+function handleCloseAllTabsInScreen(screenId: string) {
+  const screen = getScreens().find(item => item.id === screenId);
+  if (!screen) return;
+  const tabIds = getCloseAllTabIds(screen.tabs.map(tab => tab.id));
   for (const tabId of tabIds) {
     handleTabClose(tabId);
   }
+  syncVisibleTerminals();
 }
 
-function handleGroupsChanged() {
-  saveGroupsToSettings();
+async function handleRemoveScreen(screenId: string) {
+  const screen = getScreens().find(item => item.id === screenId);
+  if (!screen) return;
+  const action = await showScreenCloseDialog({
+    screenId: screen.id,
+    screenName: screen.name,
+    tabCount: screen.tabs.length,
+  });
+  if (action === 'cancel') return;
+
+  if (action === 'close') {
+    const preservedGroups: TabGroupPersisted[] = screen.groups.map(group => ({
+      id: group.id,
+      name: group.name,
+      color: group.color,
+      associatedConfigIds: group.associatedConfigIds,
+    }));
+    for (const tab of [...screen.tabs]) {
+      handleTabClose(tab.id, { persist: false, sync: false });
+    }
+    setScreenGroups(screen.id, preservedGroups.map(group => ({
+      ...group,
+      collapsed: false,
+      tabIds: [],
+    })));
+    const screens = getScreens();
+    const fallbackScreenId = screens.find(item => item.id !== screen.id && item.tabs.length > 0)?.id
+      || screens.find(item => item.id !== screen.id)?.id
+      || null;
+    if (fallbackScreenId) {
+      setActiveScreen(fallbackScreenId);
+    }
+    syncVisibleTerminals();
+    return;
+  }
+
+  for (const tab of [...screen.tabs]) {
+    handleTabClose(tab.id, { persist: false, sync: false });
+  }
+
+  if (!removeScreen(screenId)) return;
+  if (action === 'clear') {
+    persistScreenSettings();
+  }
+  syncVisibleTerminals();
 }
 
-function saveGroupsToSettings() {
+function persistScreenSettings() {
   const state = getState();
-  const persisted: TabGroupPersisted[] = state.groups.map(g => ({
-    id: g.id,
-    name: g.name,
-    color: g.color,
-    associatedConfigIds: g.associatedConfigIds,
-  }));
-  window.multiclaude.app.saveSettings({ groups: persisted });
+  const screens = state.screens.map(screen => ({ id: screen.id, name: screen.name }));
+  const screenGroups: Record<string, TabGroupPersisted[]> = {};
+  for (const screen of state.screens) {
+    screenGroups[screen.id] = screen.groups.map(group => ({
+      id: group.id,
+      name: group.name,
+      color: group.color,
+      associatedConfigIds: group.associatedConfigIds,
+    }));
+  }
+  void window.multiclaude.app.saveSettings({
+    screens,
+    activeScreenId: state.activeScreenId,
+    screenGroups,
+    groups: screenGroups['screen-a'] || [],
+  });
 }
 
 function openPreferences() {
@@ -1146,8 +1227,12 @@ function jumpToNextWaiting() {
   const nextWaitingTabId = findNextWaitingTabId(state.activeTabId);
   if (!nextWaitingTabId) return;
   expandGroupForTab(nextWaitingTabId);
+  const screenId = getTabScreenId(nextWaitingTabId);
+  if (screenId) {
+    setActiveScreen(screenId);
+  }
   setActiveTab(nextWaitingTabId);
-  showTerminal(nextWaitingTabId);
+  syncVisibleTerminals();
 }
 
 function applyRuntimeSnapshot(snapshot: Record<string, TerminalRuntimeState>) {
@@ -1174,7 +1259,7 @@ async function openSystemTerminal(configId: string, options?: { cwd?: string }):
 }
 
 function hasRunningTabsForConfig(configId: string): boolean {
-  return getState().tabs.some(tab => tab.configId === configId && tab.status === 'running');
+  return getAllTabs().some(tab => tab.configId === configId && tab.status === 'running');
 }
 
 async function runPreflightCheck(
@@ -1253,18 +1338,38 @@ function formatError(err: unknown): string {
   return String(err);
 }
 
-// Subscribe to active tab changes to show correct terminal
-let lastFocusedTabId: string | null = null;
-subscribe(() => {
-  const state = getState();
-  if (!state.activeTabId) {
-    lastFocusedTabId = null;
-    return;
+function syncVisibleTerminals(root?: HTMLElement): void {
+  const workspaceRoot = root || (document.querySelector('.screen-workspace') as HTMLElement | null);
+  if (!workspaceRoot) return;
+
+  const visibleTabIds = getVisibleTabIdsForScreens();
+  for (const paneEl of workspaceRoot.querySelectorAll<HTMLElement>('.screen-pane-terminal[data-tab-id]')) {
+    const tabId = paneEl.dataset.tabId;
+    if (!tabId) continue;
+    mountTerminalToHost(tabId, paneEl);
   }
-  if (state.activeTabId !== lastFocusedTabId) {
-    lastFocusedTabId = state.activeTabId;
-    showTerminal(state.activeTabId);
+  const activeEl = document.activeElement as HTMLElement | null;
+  const isInlineEditing = isScreenWorkspaceInlineEditing() || Boolean(
+    activeEl?.closest('.screen-pane-tab-input')
+    || activeEl?.closest('.screen-pane-group-input'),
+  );
+  if (isInlineEditing && (activeEl?.closest('.terminal-view') || activeEl?.closest('.xterm'))) {
+    activeEl.blur();
+  }
+  if (isInlineEditing) {
+    blurAllTerminals();
+  }
+  showTerminals(visibleTabIds, getState().activeTabId, !isInlineEditing);
+}
+
+subscribe(() => {
+  syncVisibleTerminals();
+  const state = getState();
+  if (state.activeScreenId !== lastPersistedActiveScreenId) {
+    lastPersistedActiveScreenId = state.activeScreenId;
+    persistScreenSettings();
   }
 });
 
+let lastPersistedActiveScreenId: string | null = null;
 init();
