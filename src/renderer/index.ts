@@ -796,8 +796,8 @@ function openWorktreeLauncher(configId: string): void {
     config,
     initialRepoPath: state.worktreeRecentRepoPaths[0] || '',
     initialTargetRef: state.worktreeDefaultTargetRef || 'main',
-    onOpenTerminal: (cwd) => {
-      void spawnTerminal(configId, { cwd });
+    onOpenTerminal: (cwd, customName) => {
+      void spawnTerminal(configId, { cwd, customName });
     },
     onPersistDefaults: async (repoPath, targetRef) => {
       const recent = [

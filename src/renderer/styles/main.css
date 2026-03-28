@@ -1486,6 +1486,13 @@ html, body {
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 }
 
+/* Keep modal controls interactive in frameless windows with drag regions. */
+.modal-overlay,
+.modal,
+.modal * {
+  -webkit-app-region: no-drag;
+}
+
 .modal-header {
   display: flex;
   align-items: center;

@@ -36,5 +36,8 @@ test('worktree launcher markup exposes dual tabs and step-oriented copy', () => 
   assert.match(html, /id="wt-filter-dirty"/);
   assert.match(html, /id="wt-filter-unknown"/);
   assert.match(html, /id="wt-compact-toggle"/);
+  assert.doesNotMatch(html, /id="wt-branch-name"[^>]*(?:readonly|disabled)/);
+  assert.doesNotMatch(html, /id="wt-path-name"[^>]*(?:readonly|disabled)/);
+  assert.doesNotMatch(html, /id="wt-from-ref"[^>]*(?:readonly|disabled)/);
   assert.match(html, /We check if your source branch is ready to merge into this target branch\./);
 });

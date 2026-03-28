@@ -5,7 +5,7 @@ interface WorktreeLauncherOptions {
   config: ModelConfig;
   initialRepoPath: string;
   initialTargetRef: string;
-  onOpenTerminal: (cwd: string) => void;
+  onOpenTerminal: (cwd: string, customName?: string) => void;
   onPersistDefaults: (repoPath: string, targetRef: string) => Promise<void>;
 }
 
@@ -255,7 +255,7 @@ export function showWorktreeLauncher(options: WorktreeLauncherOptions): void {
         fromRef: fromRefInput.value.trim() || 'HEAD',
       });
       await options.onPersistDefaults(repoPath, targetRef);
-      options.onOpenTerminal(created.path);
+      options.onOpenTerminal(created.path, branchName);
       showFeedback('worktree', 'success', `Terminal opened in ${created.path}`);
       await refresh();
     } catch (err) {
