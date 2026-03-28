@@ -1,295 +1,149 @@
-# MultiClaude — 多模型并行终端管理器
+# MultiClaude
 
-> 同时跑 Claude、Kimi、GLM 等多个大模型 CLI？一个窗口搞定。
+在一个应用里并行管理多个 AI 编程 CLI 配置（Claude / Codex），并按配置隔离终端与工作区。
 
----
+MultiClaude 是一个 Electron 桌面应用，适合需要频繁切换不同模型、不同 API Key、不同代码目录的开发场景。
 
-## 痛点：你是不是也这样？
+## 解决的问题
 
-用 Claude Code 写代码的人越来越多了。但现实往往是——你手头不止一个模型。
+CLI 工具大量依赖环境变量。手动 `export`、改 shell 配置、开多窗口容易混乱。
 
-Opus 4.6 用来啃硬骨头，Kimi K2.5 拿来做快速原型，GLM-5 跑一些测试场景……每个模型背后可能是不同的 API 地址、不同的 Token、甚至不同的代理。
+MultiClaude 提供“配置即入口”的方式：
 
-Claude Code 的配置全靠环境变量（`ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_MODEL`……），想切换模型？要么改 `.zshrc`，要么开一堆终端窗口手动 `export`，要么维护几套 shell alias——哪种都不优雅，还容易搞混。
+- 配置好模型参数
+- 一键开终端
+- 自动注入正确环境变量
 
-**MultiClaude 就是为了解决这件事。**
+## 当前功能
 
-## 它能做什么？
+- 双 Provider 配置：
+  - `claude`（Anthropic 风格变量）
+  - `codex`（OpenAI 兼容变量 + 自动生成 `CODEX_HOME/config.toml`）
+- 内嵌终端（xterm.js + node-pty）
+- 系统终端打开（继承当前配置）
+- 多屏工作区（最多 4 屏）
+- 屏内分组（重命名/折叠/删除/移动到组）
+- Worktree 启动器（创建/列出/打开/清理 worktree，合并就绪检查，复制合并命令）
+- 批量压力启动器（N 个子目录开 N 个终端，多轮脚本压测，导出 JSON 报告）
+- 启动前 Preflight 检查（缺模型/缺 Key/URL 非法/JSON 非法/Claude hooks 提示）
+- 运行状态识别（`running` / `waiting` / `idle` / `exited`）+ 一键跳到下一个等待终端
+- 侧边栏折叠/展开，宽度持久化
+- 配置导入导出（导出默认清空敏感密钥字段）
 
-简单说：**给每个模型定义一套配置，点一下就能打开一个注入了正确环境变量的终端，多个模型可以同时跑。**
+## 多屏规则
 
-具体来讲：
+- 最多 4 屏，固定槽位：`screen-a` 到 `screen-d`
+- 新建屏优先占用“第一个未使用槽位”
+- 加载时会做 screen id 去重和规范化
+- 布局规则：
+  - 1 屏：占满
+  - 2 屏：左右各半
+  - 3 屏：左侧上下各 1/4，右侧 1/2
+  - 4 屏：2x2
+- `Move To Screen` 为子菜单（现有屏列表 + `+ New Screen...`）
+- Tab 跨屏移动不会自动加入目标 Group，分组仅由用户显式操作
 
-- **命名配置** — 给每套模型环境变量起个名字，比如"Opus 4.6 直连"、"Kimi K2.5 走代理"，一目了然
-- **内嵌终端** — 应用内直接开终端（基于 xterm.js），每个标签页用不同的模型配置
-- **系统终端** — 一键打开 macOS Terminal.app，环境变量已经帮你注入好了
-- **并行使用** — 左边标签页跑 Opus，右边标签页跑 Kimi，互不干扰
+## 关闭屏幕语义
 
----
+点击屏右上角 `x` 后，可选两种行为：
 
-## 使用页面
+- `Close (Session Only)`：
+  - 仅关闭该屏当前会话中的 Tab
+  - 保留该屏和 Group 的持久化元数据
+- `Close + Clear Saved Data`：
+  - 关闭 Tab
+  - 清除该屏持久化信息
 
-![1773242596469](image/README_CH/1773242596469.png)
-![1773310348943](image/README_CH/1773310348943.png)
+## 环境变量注入机制
 
-## 功能一览
+每次启动终端，MultiClaude 会在用户数据目录写入 env 文件并注入 provider 变量。
 
-- **配置管理** — 创建、编辑、复制、删除、导入/导出模型配置
-- **内嵌终端** — 完整的 xterm.js 终端，支持 WebGL 渲染、可点击链接、右键菜单
-- **系统终端** — 一键启动 macOS Terminal.app 并自动注入环境变量
-- **多标签页** — 同时运行多个终端，每个使用不同配置
-- **环境变量覆写** — 即使你的 `~/.zshrc` 里设了同名变量也能正确覆盖（ZDOTDIR + CLAUDE_ENV_FILE 双重机制）
-- **配置搜索** — 配置多了以后可以按名称快速过滤
-- **可调侧边栏** — 拖拽调整宽度，重启后自动记住
-- **暗色主题** — Catppuccin Mocha 风格，看着舒服
-- **快捷键** — 完整的菜单栏 + 标准快捷键支持
-- **导入/导出** — 通过 JSON 文件在不同机器间同步配置
+- Claude 常见变量：
+  - `ANTHROPIC_BASE_URL`
+  - `ANTHROPIC_AUTH_TOKEN`
+  - `ANTHROPIC_MODEL`
+- Codex 常见变量：
+  - `OPENAI_BASE_URL`
+  - `OPENAI_API_KEY`（或自定义 key 名）
+  - `OPENAI_MODEL`
+  - `CODEX_HOME`
 
----
+为避免 shell 初始化覆盖变量，zsh 下会额外生成每个配置对应的 `ZDOTDIR` wrapper。
 
-## 架构概览
+## 快速开始
 
-对于想了解内部实现的同学，这是整体架构：
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Electron App                         │
-│                                                         │
-│  ┌──────────────┐    IPC     ┌────────────────────────┐ │
-│  │ Main Process │◄──────────►│   Renderer Process     │ │
-│  │              │            │                        │ │
-│  │ config-store │            │  Sidebar  │ Terminal   │ │
-│  │ pty-manager  │  node-pty  │  Config   │ Tabs       │ │
-│  │ env-builder  │◄──────────►│  Editor   │ xterm.js   │ │
-│  │ system-term  │            │  Status   │ Views      │ │
-│  │ menu         │            │  Bar      │            │ │
-│  └──────────────┘            └────────────────────────┘ │
-│         │                                               │
-│         ▼                                               │
-│  ~/.multiclaude/configs.json                            │
-│  ~/Library/Application Support/multiclaude/env-files/   │
-└─────────────────────────────────────────────────────────┘
-```
-
-主进程负责配置存储、PTY 管理和环境变量构建；渲染进程负责 UI 展示，包括侧边栏、配置编辑器、终端标签页等。两者通过 IPC 通信。
-
-### 项目结构
-
-```
-src/
-├── main/                          # Electron 主进程
-│   ├── index.ts                   # 应用生命周期、窗口创建
-│   ├── ipc-handlers.ts            # IPC 处理器注册
-│   ├── pty-manager.ts             # node-pty 的 spawn/write/resize/kill
-│   ├── config-store.ts            # 配置 CRUD，JSON 文件读写
-│   ├── system-terminal.ts         # 启动 macOS Terminal.app 并注入环境变量
-│   ├── env-builder.ts             # 构建环境变量 + ZDOTDIR wrapper
-│   └── menu.ts                    # 应用菜单栏
-├── preload/
-│   └── index.ts                   # contextBridge API
-├── renderer/
-│   ├── index.html                 # 入口 HTML
-│   ├── index.ts                   # 应用初始化、事件绑定
-│   ├── styles/
-│   │   └── main.css               # 全部样式（Catppuccin Mocha 主题）
-│   ├── components/
-│   │   ├── Sidebar.ts             # 配置列表、搜索、操作按钮
-│   │   ├── ConfigEditor.ts        # 创建/编辑配置的弹窗
-│   │   ├── TerminalTabs.ts        # 标签页管理
-│   │   ├── TerminalView.ts        # xterm.js 封装 + 右键菜单
-│   │   ├── WelcomeScreen.ts       # 首次启动的空白引导页
-│   │   └── StatusBar.ts           # 底部信息栏
-│   └── state/
-│       └── store.ts               # 简单的发布/订阅响应式状态
-└── shared/
-    ├── types.ts                   # TypeScript 接口定义
-    └── constants.ts               # IPC 通道名、默认值
-```
-
-### 环境变量覆写机制（技术细节）
-
-这是 MultiClaude 的核心难题：PTY 终端启动时会跑一个 login shell（zsh），它会 source `~/.zshrc`——如果你在 `.zshrc` 里也设了 `ANTHROPIC_BASE_URL` 之类的变量，就会把我们注入的值覆盖掉。
-
-MultiClaude 用了三重机制来确保环境变量"最后一个生效"的是我们的：
-
-1. **ZDOTDIR wrapper**（内嵌终端用）— 把 zsh 指向一个自定义的 `.zshrc`，它先 source 你真正的 `~/.zshrc`，然后再重新 export MultiClaude 的配置变量，确保我们的值在最上面。
-2. **CLAUDE_ENV_FILE**（Claude Code 专用）— 生成一个包含所有配置变量的 shell 脚本，Claude Code 启动时会 source 这个文件，覆盖 shell 设置的任何值。
-3. **osascript do script**（系统终端用）— Terminal.app 打开并完成 shell 初始化后，再 source 环境变量文件，完成覆盖。
-
-### 数据模型
-
-每个配置存储以下字段：
-
-| 字段                         | 对应环境变量                               | 说明                          |
-| ---------------------------- | ------------------------------------------ | ----------------------------- |
-| `anthropicBaseUrl`           | `ANTHROPIC_BASE_URL`                       | API 接口地址                  |
-| `anthropicAuthToken`         | `ANTHROPIC_AUTH_TOKEN`                     | 认证 Token                    |
-| `anthropicModel`             | `ANTHROPIC_MODEL`                          | 主模型名称                    |
-| `anthropicSmallFastModel`    | `ANTHROPIC_SMALL_FAST_MODEL`               | 轻量任务用的快速模型          |
-| `apiTimeoutMs`               | `API_TIMEOUT_MS`                           | 请求超时时间（默认 600000ms） |
-| `disableNonessentialTraffic` | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | 是否禁用遥测                  |
-| `customEnvVars`              | *（自定义）*                               | 任意键值对环境变量            |
-
-配置文件保存在 `~/Library/Application Support/multiclaude/configs.json`，文件权限限制为仅所有者可读写（0600）。
-
----
-
-## 安装
-
-### 方式一：DMG 安装（推荐）
-
-1. 从 [Releases](https://github.com/anthropics/multiclaude/releases) 下载最新的 `.dmg` 文件
-2. 打开 DMG，把 **MultiClaude** 拖到 Applications 文件夹
-3. 从启动台或 Spotlight 启动
-
-### 方式二：从源码构建
-
-需要 Node.js >= 18 和 pnpm。
+### 1）安装并运行
 
 ```bash
-git clone https://github.com/anthropics/multiclaude.git
-cd multiclaude
 pnpm install
-node scripts/build.js
-npx electron .
+pnpm run dev
 ```
 
-### 构建 DMG 安装包
+### 2）创建配置
+
+侧边栏点击 `+`：
+
+1. 选择 Provider（Claude 或 Codex）
+2. 填写 model/base URL/API key
+3. 保存
+
+### 3）启动终端
+
+- 内嵌终端：点击 `Terminal`
+- 系统终端：配置卡片 `...` -> `System`
+- Worktree 终端：点击 `Worktree`
+
+### 4）组织标签页
+
+- 右键 Tab -> `Move To Screen`
+- 右键 Tab -> `Move To Group`
+- 右键 Group -> 重命名 / 关闭全部 / 删除
+
+## 快捷键
+
+- `Cmd/Ctrl+T`：新建内嵌终端
+- `Cmd/Ctrl+Shift+T`：新建系统终端
+- `Cmd/Ctrl+Alt+T`：新建 Worktree 终端
+- `Cmd/Ctrl+W`：关闭当前终端标签
+- `Cmd/Ctrl+Shift+]` / `Cmd/Ctrl+Shift+[`：下一个/上一个标签
+- `Cmd/Ctrl+;`：跳到下一个 waiting 终端
+- `Cmd/Ctrl+K`：清屏
+- `Cmd/Ctrl+B`：切换侧边栏折叠
+- `Cmd/Ctrl+1..9`：跳转到指定标签
+- `Cmd/Ctrl+,`：Preferences
+
+## 数据存储位置
+
+数据写入 Electron `app.getPath('userData')`（随平台变化），主要包括：
+
+- `configs.json`
+- `settings.json`
+- `env-files/`
+- `codex-homes/`
+
+## 构建与测试
+
+```bash
+pnpm run build
+pnpm run test
+pnpm run start
+```
+
+打包：
 
 ```bash
 pnpm run dist:mac
+pnpm run dist:win
 ```
 
-产出文件：`out/MultiClaude-1.0.0-arm64.dmg`（和/或 x64 版本）
+## 项目结构
 
----
+- `src/main/`：主进程（IPC、PTY、配置存储、环境构建、protocol/worktree 服务）
+- `src/preload/`：安全桥接 API
+- `src/renderer/`：界面、状态、组件
+- `src/shared/`：共享类型与常量
 
-## 使用指南
+## 仓库地址
 
-### 第一步：创建配置
-
-启动 MultiClaude，首次打开会看到欢迎页面。
-
-点击 **Create Your First Config**，填写以下信息：
-
-- **Name** — 给配置起个好认的名字，比如"Opus 4.6 直连"、"Kimi K2.5 走代理"
-- **Color** — 选个颜色，方便一眼区分不同配置
-- **Model** — 模型标识符，比如 `claude-opus-4-6`、`kimi-k2.5`
-- **Base URL** — API 地址，比如 `https://api.anthropic.com`、`https://api.kimi.com/coding/`
-- **Auth Token** — 你的 API Key 或认证令牌
-- **Custom Env Vars** — 需要额外的环境变量？点"+ Add Variable"添加
-
-填完点 **Create**，搞定。
-
-### 第二步：打开内嵌终端
-
-在侧边栏单击选中一个配置，然后：
-
-- 点击配置上的 **Terminal** 按钮，或
-- 按 `Cmd+T`
-
-一个新的终端标签页就会打开，所有配置里的环境变量已经注入好了。直接输入 `claude` 就能用对应的模型。
-
-想验证一下？跑这个命令：
-
-```bash
-env | grep ANTHROPIC
-```
-
-### 第三步：打开系统终端
-
-点击配置上的 **System** 按钮，macOS 的 Terminal.app 会打开一个新窗口，环境变量已经加载好了。你会看到确认信息：
-
-```
-[MultiClaude] Config loaded: Kimi K2.5
-```
-
-### 第四步：管理多个终端
-
-- **切换标签页**：点击标签，或 `Cmd+Shift+]` / `Cmd+Shift+[`
-- **跳到第 N 个标签页**：`Cmd+1` 到 `Cmd+9`
-- **关闭标签页**：点标签上的 X，或 `Cmd+W`
-- **清屏**：`Cmd+K`
-
-### 第五步：导入/导出配置
-
-- **导出**：菜单 > Config > Export Configs — 把所有配置保存为 JSON 文件
-- **导入**：菜单 > Config > Import Configs — 从 JSON 文件加载配置，名称冲突会自动重命名
-
-**注意**：导出的文件里包含明文的 Auth Token，请妥善保管。
-
----
-
-## 快捷键速查
-
-| 快捷键            | 功能                       |
-| ----------------- | -------------------------- |
-| `Cmd+T`           | 为选中配置打开新的内嵌终端 |
-| `Cmd+Shift+T`     | 为选中配置打开新的系统终端 |
-| `Cmd+W`           | 关闭当前终端标签页         |
-| `Cmd+N`           | 新建配置                   |
-| `Cmd+E`           | 编辑选中的配置             |
-| `Cmd+D`           | 复制选中的配置             |
-| `Cmd+K`           | 清屏                       |
-| `Cmd+B`           | 切换侧边栏显示/隐藏        |
-| `Cmd+Shift+]`     | 下一个标签页               |
-| `Cmd+Shift+[`     | 上一个标签页               |
-| `Cmd+1`..`Cmd+9`  | 跳到第 N 个标签页          |
-| `Cmd+=` / `Cmd+-` | 放大 / 缩小                |
-| `Cmd+0`           | 重置缩放                   |
-
-### 右键菜单
-
-在终端里右键可以：
-
-- 复制 / 粘贴 / 全选
-- 清屏
-- 用当前配置打开系统终端
-
----
-
-## 技术栈
-
-| 组件     | 技术选型                                         |
-| -------- | ------------------------------------------------ |
-| 框架     | Electron 34                                      |
-| 语言     | TypeScript 5.7                                   |
-| 终端     | @xterm/xterm 5.5 + 插件（fit、webgl、web-links） |
-| PTY      | node-pty                                         |
-| 打包工具 | esbuild                                          |
-| 分发打包 | electron-builder                                 |
-| UI       | 原生 TypeScript（无框架依赖）                    |
-
----
-
-## 本地开发
-
-```bash
-# 安装依赖
-pnpm install
-
-# 构建
-node scripts/build.js
-
-# 开发模式运行
-npx electron .
-
-# 构建可分发版本
-pnpm run dist:mac
-```
-
----
-
-## 参与贡献
-
-这个项目还在持续完善中，非常欢迎大家参与进来：
-
-- **提 Issue** — 遇到 Bug 或者有功能建议？直接开个 [Issue](https://github.com/zkkython/MultiClaude/issues) 就好
-- **提交 PR** — Fork 仓库，改完代码提个 Pull Request，我们一起让它变得更好
-- **交流想法** — 有任何想法或疑问，欢迎到 [Discussions](https://github.com/zkkython/MultiClaude/discussions) 聊聊
-
-不管是修个 typo 还是加个大功能，每一份贡献都很有价值。
-
-## 许可证
-
-Apache 2.0
+- 项目主页：https://github.com/zkkython/MultiClaude
+- Issue：https://github.com/zkkython/MultiClaude/issues
