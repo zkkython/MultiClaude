@@ -73,6 +73,12 @@ html, body {
   border-right: 1px solid var(--border);
   position: relative;
   flex-shrink: 0;
+  transition: width 150ms ease;
+}
+
+.sidebar.is-collapsed {
+  min-width: 40px;
+  max-width: 40px;
 }
 
 .sidebar-titlebar-drag {
@@ -116,6 +122,12 @@ html, body {
   -webkit-app-region: drag;
 }
 
+.sidebar-header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .sidebar-header h2 {
   font-size: 14px;
   font-weight: 600;
@@ -128,6 +140,47 @@ html, body {
   font-size: 18px;
   width: 36px;
   height: 36px;
+}
+
+.sidebar-header .sidebar-toggle-btn {
+  -webkit-app-region: no-drag;
+  width: 28px;
+  height: 28px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface0);
+  color: var(--text-dim);
+}
+
+.sidebar-header .sidebar-toggle-btn:hover {
+  background: var(--bg-surface1);
+  color: var(--text);
+}
+
+.sidebar-collapsed-rail {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  height: 100%;
+  padding-top: calc(var(--titlebar-height) + 8px);
+}
+
+.sidebar-collapsed-rail .sidebar-toggle-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface0);
+  color: var(--text-dim);
+}
+
+.sidebar-collapsed-rail .sidebar-toggle-btn:hover {
+  background: var(--bg-surface1);
+  color: var(--text);
+}
+
+.sidebar.is-collapsed .sidebar-drag-handle {
+  display: none;
 }
 
 .sidebar-search {

@@ -122,7 +122,7 @@ async function init() {
     const hasConfigs = state.configs.length > 0;
     const hasTabs = getAllTabs().length > 0;
 
-    sidebar.style.display = state.sidebarVisible ? 'flex' : 'none';
+    sidebar.classList.toggle('is-collapsed', !state.sidebarVisible);
     welcomeScreen.style.display = (!hasConfigs && !hasTabs) ? 'flex' : 'none';
     workspace.style.display = hasTabs ? 'grid' : 'none';
     // Terminal views are mounted into per-screen hosts; keep staging container hidden.
@@ -181,6 +181,7 @@ async function init() {
 
   // Initial visibility
   const state = getState();
+  sidebar.classList.toggle('is-collapsed', !state.sidebarVisible);
   welcomeScreen.style.display = state.configs.length === 0 ? 'flex' : 'none';
   workspace.style.display = 'none';
   termContainer.style.display = 'none';
@@ -203,6 +204,9 @@ async function init() {
 
 function handleSidebarAction(action: SidebarAction) {
   switch (action.type) {
+    case 'toggle-sidebar':
+      toggleSidebar();
+      break;
     case 'select-config':
       setState({ selectedConfigId: action.configId });
       break;
@@ -625,8 +629,7 @@ async function handleMenuAction(action: string, payload?: any) {
       if (state.activeTabId) pasteToTerminal(state.activeTabId);
       break;
     case 'toggle-sidebar':
-      setState({ sidebarVisible: !state.sidebarVisible });
-      requestAnimationFrame(fitAllTerminals);
+      toggleSidebar();
       break;
     case 'zoom-in': {
       const newSize = Math.min(state.fontSize + 2, 32);
@@ -665,6 +668,12 @@ async function handleMenuAction(action: string, payload?: any) {
       persistScreenSettings();
       break;
   }
+}
+
+function toggleSidebar(): void {
+  const state = getState();
+  setState({ sidebarVisible: !state.sidebarVisible });
+  requestAnimationFrame(fitAllTerminals);
 }
 
 function handleCloseOtherTabs(currentTabId: string) {

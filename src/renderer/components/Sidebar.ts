@@ -3,6 +3,24 @@ import { DEFAULTS } from '../../shared/constants.js';
 import type { ModelConfig } from '../../shared/types.js';
 import { collectPreflightIssues } from '../preflight.js';
 
+const PANEL_LEFT_OPEN_ICON = `
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+    <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+    <path d="M9 4v16"></path>
+    <path d="m14 12 3 3"></path>
+    <path d="m14 12 3-3"></path>
+  </svg>
+`;
+
+const PANEL_LEFT_CLOSE_ICON = `
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+    <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+    <path d="M9 4v16"></path>
+    <path d="m16 9-3 3"></path>
+    <path d="m16 15-3-3"></path>
+  </svg>
+`;
+
 export type SidebarAction =
   | { type: 'new-terminal'; configId: string }
   | { type: 'worktree-terminal'; configId: string }
@@ -12,6 +30,7 @@ export type SidebarAction =
   | { type: 'duplicate-config'; configId: string }
   | { type: 'delete-config'; configId: string }
   | { type: 'new-config' }
+  | { type: 'toggle-sidebar' }
   | { type: 'select-config'; configId: string };
 
 export function buildConfigActionsMarkup(configId: string): string {
@@ -60,6 +79,7 @@ export function buildConfigActionsMarkup(configId: string): string {
 }
 
 export function createSidebar(onAction: (action: SidebarAction) => void): HTMLElement {
+  const COLLAPSED_WIDTH = 40;
   const sidebar = document.createElement('div');
   sidebar.className = 'sidebar';
 
@@ -81,12 +101,21 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
   let prevSelectedConfigId: string | null = null;
   let prevSearchQuery = '';
   let prevSidebarWidth = -1;
+  let prevSidebarVisible: boolean | null = null;
   let preflightRefreshSeq = 0;
   let showMoreCoachmark = readMoreCoachmarkFlag();
   const preflightByConfigId = new Map<string, { level: 'ok' | 'warning' | 'blocker'; title: string }>();
 
   function render() {
     const state = getState();
+    if (!state.sidebarVisible) {
+      content.innerHTML = `
+        <div class="sidebar-collapsed-rail">
+          <button class="btn btn-icon sidebar-toggle-btn" title="Expand Configs" aria-label="Expand Configs">${PANEL_LEFT_OPEN_ICON}</button>
+        </div>
+      `;
+      return;
+    }
     const configs = state.configs;
     const showSearch = configs.length >= DEFAULTS.CONFIG_SEARCH_THRESHOLD;
     const filteredConfigs = state.searchQuery
@@ -95,7 +124,10 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
 
     content.innerHTML = `
       <div class="sidebar-header">
-        <h2>Configs</h2>
+        <div class="sidebar-header-title">
+          <h2>Configs</h2>
+          <button class="btn btn-icon sidebar-toggle-btn" title="Collapse Configs" aria-label="Collapse Configs">${PANEL_LEFT_CLOSE_ICON}</button>
+        </div>
         <button class="btn btn-icon sidebar-add-btn" title="New Config">+</button>
       </div>
       ${showSearch ? `
@@ -119,6 +151,7 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
   let startWidth = 0;
 
   dragHandle.addEventListener('mousedown', (e) => {
+    if (!getState().sidebarVisible) return;
     isDragging = true;
     startX = e.clientX;
     startWidth = sidebar.offsetWidth;
@@ -187,6 +220,10 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
 
     if (target.closest('.sidebar-add-btn')) {
       onAction({ type: 'new-config' });
+      return;
+    }
+    if (target.closest('.sidebar-toggle-btn')) {
+      onAction({ type: 'toggle-sidebar' });
       return;
     }
 
@@ -263,9 +300,16 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
     const state = getState();
     const shouldRender = prevConfigsRef !== state.configs
       || prevSelectedConfigId !== state.selectedConfigId
-      || prevSearchQuery !== state.searchQuery;
-    if (prevSidebarWidth !== state.sidebarWidth) {
+      || prevSearchQuery !== state.searchQuery
+      || prevSidebarVisible !== state.sidebarVisible;
+    if (state.sidebarVisible && (prevSidebarWidth !== state.sidebarWidth || prevSidebarVisible !== state.sidebarVisible)) {
       sidebar.style.width = `${state.sidebarWidth}px`;
+      prevSidebarWidth = state.sidebarWidth;
+    }
+    if (!state.sidebarVisible && prevSidebarVisible !== state.sidebarVisible) {
+      sidebar.style.width = `${COLLAPSED_WIDTH}px`;
+    }
+    if (prevSidebarWidth !== state.sidebarWidth) {
       prevSidebarWidth = state.sidebarWidth;
     }
     if (!shouldRender) return;
@@ -273,6 +317,7 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
     prevConfigsRef = state.configs;
     prevSelectedConfigId = state.selectedConfigId;
     prevSearchQuery = state.searchQuery;
+    prevSidebarVisible = state.sidebarVisible;
     render();
     if (configChanged) {
       void refreshPreflightBadges(state.configs);
@@ -282,11 +327,12 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
 
   // Apply initial width
   const state = getState();
-  sidebar.style.width = `${state.sidebarWidth}px`;
+  sidebar.style.width = state.sidebarVisible ? `${state.sidebarWidth}px` : `${COLLAPSED_WIDTH}px`;
   prevConfigsRef = state.configs;
   prevSelectedConfigId = state.selectedConfigId;
   prevSearchQuery = state.searchQuery;
   prevSidebarWidth = state.sidebarWidth;
+  prevSidebarVisible = state.sidebarVisible;
   void refreshPreflightBadges(state.configs);
 
   return sidebar;
