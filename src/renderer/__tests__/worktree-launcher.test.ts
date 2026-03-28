@@ -1,0 +1,40 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { buildWorktreeLauncherMarkup } from '../components/WorktreeLauncher.js';
+
+test('worktree launcher markup exposes dual tabs and step-oriented copy', () => {
+  const html = buildWorktreeLauncherMarkup('Opus4.6', '/tmp/repo', 'main');
+
+  assert.match(html, /data-tab="worktree"[^>]*>Worktree</);
+  assert.match(html, /data-tab="merge"[^>]*>Merge</);
+  assert.match(html, /Step 1 · Select repository\./);
+  assert.match(html, /Step 2 · Create a new worktree, or choose one from the list\./);
+  assert.match(html, /Step 3 · Open terminal and start coding in the selected worktree\./);
+  assert.match(html, /Step 1 · Choose target branch for readiness and merge\./);
+  assert.match(html, /Step 2 · Choose merge strategy and source ref\./);
+  assert.match(html, /Step 3 · Paste into terminal and run after confirming readiness\./);
+  assert.match(html, /Merge Target Branch/);
+  assert.match(html, /Copy Merge Command/);
+  assert.match(html, /Generate Merge Command/);
+  assert.match(html, /Task goal:[\s\S]*open a coding terminal\./);
+  assert.match(html, /Task goal:[\s\S]*safe merge command/);
+  assert.match(html, /Done when terminal opens in the selected worktree\./);
+  assert.match(html, /Done when command is copied and ready to run in terminal\./);
+  assert.match(html, /Fill source \+ target refs to preview command\./);
+  assert.match(html, /Tip: choose repository first/);
+  assert.match(html, /Shortcut: ⌘\/Ctrl\+1 switch Worktree tab/);
+  assert.match(html, /Shortcut: ⌘\/Ctrl\+2 switch Merge tab · ⌘\/Ctrl\+Shift\+C copy merge command\./);
+  assert.match(html, /id="wt-readiness-summary"/);
+  assert.match(html, /id="wt-help-panel"/);
+  assert.match(html, /id="wt-help-toggle"/);
+  assert.match(html, /id="wt-select-ready"/);
+  assert.match(html, /id="wt-copy-batch"/);
+  assert.match(html, /id="wt-batch-preview"/);
+  assert.match(html, /id="wt-filter-all"/);
+  assert.match(html, /id="wt-filter-ready"/);
+  assert.match(html, /id="wt-filter-behind"/);
+  assert.match(html, /id="wt-filter-dirty"/);
+  assert.match(html, /id="wt-filter-unknown"/);
+  assert.match(html, /id="wt-compact-toggle"/);
+  assert.match(html, /We check if your source branch is ready to merge into this target branch\./);
+});

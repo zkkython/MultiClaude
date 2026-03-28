@@ -11,9 +11,14 @@ const api: MultiClaudeAPI = {
     duplicate: (id) => ipcRenderer.invoke(IPC.CONFIG_DUPLICATE, id),
     export: () => ipcRenderer.invoke(IPC.CONFIG_EXPORT),
     import: () => ipcRenderer.invoke(IPC.CONFIG_IMPORT),
+    onChanged: (callback) => {
+      const handler = () => callback();
+      ipcRenderer.on(IPC.CONFIG_CHANGED, handler);
+      return () => ipcRenderer.removeListener(IPC.CONFIG_CHANGED, handler);
+    },
   },
   terminal: {
-    spawn: (configId) => ipcRenderer.invoke(IPC.TERMINAL_SPAWN, configId),
+    spawn: (configId, options) => ipcRenderer.invoke(IPC.TERMINAL_SPAWN, configId, options),
     write: (terminalId, data) => ipcRenderer.send(IPC.TERMINAL_WRITE, terminalId, data),
     resize: (terminalId, cols, rows) => ipcRenderer.send(IPC.TERMINAL_RESIZE, terminalId, cols, rows),
     kill: (terminalId) => ipcRenderer.send(IPC.TERMINAL_KILL, terminalId),
@@ -27,9 +32,15 @@ const api: MultiClaudeAPI = {
       ipcRenderer.on(IPC.TERMINAL_EXIT, handler);
       return () => ipcRenderer.removeListener(IPC.TERMINAL_EXIT, handler);
     },
+    onState: (callback) => {
+      const handler = (_event: any, terminalId: string, state: any) => callback(terminalId, state);
+      ipcRenderer.on(IPC.TERMINAL_STATE, handler);
+      return () => ipcRenderer.removeListener(IPC.TERMINAL_STATE, handler);
+    },
+    getStateSnapshot: () => ipcRenderer.invoke(IPC.TERMINAL_STATE_SNAPSHOT_GET),
   },
   systemTerminal: {
-    open: (configId) => ipcRenderer.invoke(IPC.SYSTEM_TERMINAL_OPEN, configId),
+    open: (configId, options) => ipcRenderer.invoke(IPC.SYSTEM_TERMINAL_OPEN, configId, options),
   },
   contextMenu: {
     show: (terminalId, hasSelection) => ipcRenderer.send(IPC.CONTEXT_MENU_SHOW, terminalId, hasSelection),
@@ -49,6 +60,38 @@ const api: MultiClaudeAPI = {
     },
     getSettings: () => ipcRenderer.invoke(IPC.APP_GET_SETTINGS),
     saveSettings: (settings) => ipcRenderer.invoke(IPC.APP_SAVE_SETTINGS, settings),
+    selectDirectory: (defaultPath) => ipcRenderer.invoke(IPC.APP_SELECT_DIRECTORY, defaultPath),
+    ensureDirectory: (path) => ipcRenderer.invoke(IPC.APP_ENSURE_DIRECTORY, path),
+    writeTextFile: (path, content) => ipcRenderer.invoke(IPC.APP_WRITE_TEXT_FILE, path, content),
+    setIgnoreMenuShortcuts: (ignore) => ipcRenderer.invoke(IPC.APP_SET_IGNORE_MENU_SHORTCUTS, ignore),
+  },
+  worktree: {
+    list: (repoPath) => ipcRenderer.invoke(IPC.WORKTREE_LIST, repoPath),
+    create: (input) => ipcRenderer.invoke(IPC.WORKTREE_CREATE, input),
+    remove: (input) => ipcRenderer.invoke(IPC.WORKTREE_REMOVE, input),
+    prune: (repoPath) => ipcRenderer.invoke(IPC.WORKTREE_PRUNE, repoPath),
+    status: (worktreePath) => ipcRenderer.invoke(IPC.WORKTREE_STATUS, worktreePath),
+    mergeReadiness: (worktreePath, targetRef) => ipcRenderer.invoke(IPC.WORKTREE_MERGE_READINESS, worktreePath, targetRef),
+    buildMergeTemplate: (input) => ipcRenderer.invoke(IPC.WORKTREE_MERGE_TEMPLATE, input),
+  },
+  protocol: {
+    startSession: (configId, terminalId) => ipcRenderer.invoke(IPC.RUNNER_SESSION_START, configId, terminalId),
+    ingestRawEvent: (sessionId, rawEvent) => ipcRenderer.invoke(IPC.RUNNER_EVENT_INGEST, sessionId, rawEvent),
+    resolveInput: (sessionId, requestId) => ipcRenderer.invoke(IPC.RUNNER_INPUT_RESOLVE, sessionId, requestId),
+    submitInput: (input) => ipcRenderer.invoke(IPC.RUNNER_INPUT_SUBMIT, input),
+    interruptSession: (sessionId) => ipcRenderer.invoke(IPC.RUNNER_SESSION_INTERRUPT, sessionId),
+    stopSession: (sessionId) => ipcRenderer.invoke(IPC.RUNNER_SESSION_STOP, sessionId),
+    endSession: (sessionId) => ipcRenderer.invoke(IPC.RUNNER_SESSION_END, sessionId),
+    onEvent: (callback) => {
+      const handler = (_event: any, runnerEvent: any) => callback(runnerEvent);
+      ipcRenderer.on(IPC.RUNNER_EVENT, handler);
+      return () => ipcRenderer.removeListener(IPC.RUNNER_EVENT, handler);
+    },
+    getMetrics: () => ipcRenderer.invoke(IPC.RUNNER_METRICS_GET),
+    resetMetrics: () => ipcRenderer.invoke(IPC.RUNNER_METRICS_RESET),
+    testConnectivity: (input) => ipcRenderer.invoke(IPC.RUNNER_CONNECTIVITY_TEST, input),
+    getClaudeHooksStatus: () => ipcRenderer.invoke(IPC.RUNNER_CLAUDE_HOOKS_STATUS_GET),
+    installClaudeHooks: () => ipcRenderer.invoke(IPC.RUNNER_CLAUDE_HOOKS_INSTALL),
   },
 };
 

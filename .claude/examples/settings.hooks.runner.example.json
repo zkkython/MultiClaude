@@ -1,0 +1,56 @@
+{
+  "hooks": {
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/kason/infra/multiclaude/scripts/hooks/claude-runner-sidechannel.js"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/kason/infra/multiclaude/scripts/hooks/claude-runner-sidechannel.js"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/kason/infra/multiclaude/scripts/hooks/claude-runner-sidechannel.js"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/kason/infra/multiclaude/scripts/hooks/claude-runner-sidechannel.js"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/kason/infra/multiclaude/scripts/hooks/claude-runner-sidechannel.js"
+          }
+        ]
+      }
+    ]
+  }
+}

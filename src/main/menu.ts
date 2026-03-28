@@ -42,6 +42,11 @@ export function createAppMenu(): void {
         accelerator: 'CmdOrCtrl+Shift+T',
         click: () => sendMenuAction('new-system-terminal'),
       },
+      {
+        label: 'New Worktree Terminal',
+        accelerator: 'CmdOrCtrl+Alt+T',
+        click: () => sendMenuAction('new-worktree-terminal'),
+      },
       { type: 'separator' },
       {
         label: 'Close Terminal',
@@ -63,6 +68,14 @@ export function createAppMenu(): void {
       { role: 'copy' },
       { role: 'paste' },
       { role: 'selectAll' },
+      ...(isMac ? [] : [
+        { type: 'separator' as const },
+        {
+          label: 'Preferences...',
+          accelerator: 'Ctrl+,',
+          click: () => sendMenuAction('preferences'),
+        },
+      ]),
     ],
   });
 
@@ -115,6 +128,11 @@ export function createAppMenu(): void {
         accelerator: 'CmdOrCtrl+Shift+[',
         click: () => sendMenuAction('prev-tab'),
       },
+      {
+        label: 'Next Waiting Terminal',
+        accelerator: 'CmdOrCtrl+;',
+        click: () => sendMenuAction('next-waiting'),
+      },
       { type: 'separator' },
       ...Array.from({ length: 9 }, (_, i) => ({
         label: `Go to Tab ${i + 1}`,
@@ -126,6 +144,11 @@ export function createAppMenu(): void {
         label: 'Clear Terminal',
         accelerator: 'CmdOrCtrl+K',
         click: () => sendMenuAction('clear-terminal'),
+      },
+      { type: 'separator' },
+      {
+        label: 'Auto Group by Config',
+        click: () => sendMenuAction('auto-group-by-config'),
       },
     ],
   });
@@ -177,11 +200,11 @@ export function createAppMenu(): void {
     submenu: [
       {
         label: 'Documentation',
-        click: () => shell.openExternal('https://github.com/anthropics/claude-code'),
+        click: () => shell.openExternal('https://github.com/zkkython/MultiClaude'),
       },
       {
         label: 'Report Issue',
-        click: () => shell.openExternal('https://github.com/anthropics/claude-code/issues'),
+        click: () => shell.openExternal('https://github.com/zkkython/MultiClaude/issues'),
       },
     ],
   });

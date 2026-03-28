@@ -1,264 +1,144 @@
 # MultiClaude
 
-Run multiple Claude Code (or any LLM CLI) configurations in parallel terminals. Define model configs with different API endpoints, tokens, and models, then launch terminals — embedded or system — with the correct environment variables automatically injected.
+Run multiple AI coding CLI profiles in parallel, with isolated terminals and workspace management.
 
-## Why MultiClaude?
+MultiClaude is an Electron desktop app for teams or individuals who switch between different providers/models (Claude and Codex-compatible endpoints), different API keys, and different working directories all day.
 
-Claude Code CLI reads its configuration from environment variables (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`, etc.). If you work with multiple models (Opus 4.6, Kimi K2.5, GLM-5, etc.) via a mix of direct API access and API proxies, you need different env vars in different terminal windows. Managing this manually with shell aliases or dotfiles is error-prone.
+## What It Solves
 
-MultiClaude solves this by letting you:
+Instead of manually changing shell environment variables, MultiClaude lets you save named profiles and launch terminals with the right env injected automatically.
 
-- **Define named configs** — each one stores a complete set of env vars for a model
-- **Open embedded terminals** — xterm.js-powered terminals right inside the app, each with its own config
-- **Open system terminals** — launch macOS Terminal.app with the correct env vars pre-loaded
-- **Run configs in parallel** — different tabs/windows can use different models simultaneously
+## Current Capabilities
 
-## Features
+- Config profiles for two providers:
+  - `claude` (Anthropic-style env set)
+  - `codex` (OpenAI-compatible env + generated `CODEX_HOME/config.toml`)
+- Embedded terminal tabs (xterm.js + node-pty)
+- Open system terminal with the selected config
+- Multi-screen workspace (up to 4 screens)
+- Screen-local tab groups (rename/collapse/delete, explicit move to group)
+- Worktree launcher (create/list/open/prune worktrees, merge readiness, copy merge commands)
+- Batch stress launcher (spawn N terminals in subdirs, run multi-round scripts, export JSON report)
+- Preflight checks before launch (missing model/key, invalid URL/JSON, Claude hooks warnings)
+- Runtime state detection (`running` / `waiting` / `idle` / `exited`) + jump to next waiting terminal
+- Sidebar collapse/expand + persisted sidebar width
+- Import/export configs (export intentionally removes secret keys/tokens)
 
-- **Config Management** — Create, edit, duplicate, delete, import/export model configurations
-- **Embedded Terminal** — Full xterm.js terminal with WebGL rendering, clickable links, and right-click context menu
-- **System Terminal** — One-click to open macOS Terminal.app with env vars injected
-- **Multi-Tab** — Run multiple terminals simultaneously with different configs
-- **Env Override** — Correctly overrides env vars even when `~/.zshrc` sets them (ZDOTDIR + CLAUDE_ENV_FILE dual mechanism)
-- **Config Search** — Filter configs by name when you have 5+
-- **Resizable Sidebar** — Drag to resize, width persisted across restarts
-- **Dark Theme** — Catppuccin Mocha-inspired design
-- **Keyboard Shortcuts** — Full menu bar with standard shortcuts
-- **Import/Export** — Share configs across machines via JSON files
+## Multi-Screen Behavior
 
-## Architecture
+- Max 4 screens, canonical slots: `screen-a` to `screen-d`
+- New screen uses the first unused slot id/name
+- Screen ids are deduplicated during load normalization
+- Adaptive layout:
+  - 1 screen: full area
+  - 2 screens: 50/50
+  - 3 screens: two quarter panes on the left + one half-height pane on the right
+  - 4 screens: 2x2
+- `Move To Screen` is a submenu (existing screens + `+ New Screen...`)
+- Moving a tab across screens does not auto-add it into any group
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Electron App                         │
-│                                                         │
-│  ┌──────────────┐    IPC     ┌────────────────────────┐ │
-│  │ Main Process │◄──────────►│   Renderer Process     │ │
-│  │              │            │                        │ │
-│  │ config-store │            │  Sidebar  │ Terminal   │ │
-│  │ pty-manager  │  node-pty  │  Config   │ Tabs       │ │
-│  │ env-builder  │◄──────────►│  Editor   │ xterm.js   │ │
-│  │ system-term  │            │  Status   │ Views      │ │
-│  │ menu         │            │  Bar      │            │ │
-│  └──────────────┘            └────────────────────────┘ │
-│         │                                               │
-│         ▼                                               │
-│  ~/.multiclaude/configs.json                            │
-│  ~/Library/Application Support/multiclaude/env-files/   │
-└─────────────────────────────────────────────────────────┘
-```
+## Close Screen Semantics
 
-### Project Structure
+Click the `x` on a screen pane, then choose:
 
-```
-src/
-├── main/                          # Electron main process
-│   ├── index.ts                   # App lifecycle, window creation
-│   ├── ipc-handlers.ts            # All IPC handler registrations
-│   ├── pty-manager.ts             # node-pty spawn/write/resize/kill
-│   ├── config-store.ts            # Config CRUD, JSON file I/O
-│   ├── system-terminal.ts         # Launch macOS Terminal.app with env vars
-│   ├── env-builder.ts             # Build env vars + ZDOTDIR wrapper
-│   └── menu.ts                    # Application menu bar
-├── preload/
-│   └── index.ts                   # contextBridge API
-├── renderer/
-│   ├── index.html                 # Entry HTML
-│   ├── index.ts                   # App init, event wiring
-│   ├── styles/
-│   │   └── main.css               # All styles (Catppuccin Mocha theme)
-│   ├── components/
-│   │   ├── Sidebar.ts             # Config list, search, action buttons
-│   │   ├── ConfigEditor.ts        # Create/edit config modal
-│   │   ├── TerminalTabs.ts        # Tab bar management
-│   │   ├── TerminalView.ts        # xterm.js wrapper + context menu
-│   │   ├── WelcomeScreen.ts       # First-launch empty state
-│   │   └── StatusBar.ts           # Bottom info bar
-│   └── state/
-│       └── store.ts               # Simple pub/sub reactive state
-└── shared/
-    ├── types.ts                   # TypeScript interfaces
-    └── constants.ts               # IPC channel names, defaults
-```
+- `Close (Session Only)`:
+  - Closes tabs in that screen for this session
+  - Keeps persisted screen/group metadata
+- `Close + Clear Saved Data`:
+  - Closes tabs
+  - Removes persisted screen data
 
-### How Env Override Works
+## Environment Injection Model
 
-The core challenge: PTY terminals start a login shell (zsh) that sources `~/.zshrc`, which may overwrite the env vars we inject. MultiClaude uses a dual mechanism:
+For each launched terminal, MultiClaude writes an env file under user data and injects provider vars.
 
-1. **ZDOTDIR wrapper** (for embedded terminals) — Points zsh to a custom `.zshrc` that sources the real `~/.zshrc` first, then re-exports MultiClaude's config vars on top.
-2. **CLAUDE_ENV_FILE** (for Claude Code) — Creates a shell script with all config vars. Claude Code sources this file on startup, overriding anything the shell set.
-3. **`osascript do script`** (for system terminals) — After Terminal.app opens and completes shell init, sources the env file to override variables.
+- Claude profile uses variables like:
+  - `ANTHROPIC_BASE_URL`
+  - `ANTHROPIC_AUTH_TOKEN`
+  - `ANTHROPIC_MODEL`
+- Codex profile uses variables like:
+  - `OPENAI_BASE_URL`
+  - `OPENAI_API_KEY` (or custom env key)
+  - `OPENAI_MODEL`
+  - `CODEX_HOME`
 
-### Data Model
+To ensure shell init does not override your config, MultiClaude also writes a per-config `ZDOTDIR` wrapper when using zsh.
 
-Each config stores:
+## Quick Start
 
-| Field                          | Env Var                                      | Description                       |
-| ------------------------------ | -------------------------------------------- | --------------------------------- |
-| `anthropicBaseUrl`           | `ANTHROPIC_BASE_URL`                       | API endpoint URL                  |
-| `anthropicAuthToken`         | `ANTHROPIC_AUTH_TOKEN`                     | Auth token                        |
-| `anthropicModel`             | `ANTHROPIC_MODEL`                          | Primary model name                |
-| `anthropicSmallFastModel`    | `ANTHROPIC_SMALL_FAST_MODEL`               | Fast model for lightweight tasks  |
-| `apiTimeoutMs`               | `API_TIMEOUT_MS`                           | Request timeout (default: 600000) |
-| `disableNonessentialTraffic` | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | Disable telemetry                 |
-| `customEnvVars`              | *(any)*                                    | Arbitrary key-value env vars      |
-
-Configs are persisted in `~/Library/Application Support/multiclaude/configs.json` with file permissions restricted to owner (0600).
-
-## Installation
-
-### From DMG (Recommended)
-
-1. Download the latest `.dmg` from [Releases](https://github.com/anthropics/multiclaude/releases)
-2. Open the DMG and drag **MultiClaude** to Applications
-3. Launch from Applications or Spotlight
-
-> **macOS Gatekeeper Notice**: This app is not code-signed with an Apple Developer certificate. On first launch, macOS may show **"MultiClaude.app is damaged and can't be opened"** or **"Apple cannot check it for malicious software"**. To fix this, run the following command in Terminal:
->
-> ```bash
-> xattr -cr /Applications/MultiClaude.app
-> ```
->
-> Then reopen the app. This removes the macOS quarantine flag applied to apps downloaded from the internet.
-
-### From Source
-
-Requirements: Node.js >= 18, pnpm
+### 1) Install and run
 
 ```bash
-git clone https://github.com/anthropics/multiclaude.git
-cd multiclaude
 pnpm install
-node scripts/build.js
-npx electron .
+pnpm run dev
 ```
 
-### Build DMG
+### 2) Create a config
+
+In sidebar:
+
+1. Click `+`
+2. Choose provider (`Claude` or `Codex`)
+3. Fill model/base URL/API key
+4. Save
+
+### 3) Launch terminals
+
+- Embedded terminal: click `Terminal`
+- System terminal: open action menu (`...`) -> `System`
+- Worktree terminal: click `Worktree`
+
+### 4) Organize tabs
+
+- Right click tab -> `Move To Screen`
+- Right click tab -> `Move To Group`
+- Right click group -> rename / close all / delete
+
+## Keyboard Shortcuts
+
+- `Cmd/Ctrl+T`: New terminal
+- `Cmd/Ctrl+Shift+T`: New system terminal
+- `Cmd/Ctrl+Alt+T`: New worktree terminal
+- `Cmd/Ctrl+W`: Close terminal tab
+- `Cmd/Ctrl+Shift+]` / `Cmd/Ctrl+Shift+[` : Next/previous tab
+- `Cmd/Ctrl+;` : Jump to next waiting terminal
+- `Cmd/Ctrl+K`: Clear terminal
+- `Cmd/Ctrl+B`: Toggle sidebar
+- `Cmd/Ctrl+1..9`: Go to tab by index
+- `Cmd/Ctrl+,`: Preferences
+
+## Storage Paths
+
+Data is stored in Electron `app.getPath('userData')` (platform specific), including:
+
+- `configs.json`
+- `settings.json`
+- `env-files/`
+- `codex-homes/`
+
+## Build / Test
+
+```bash
+pnpm run build
+pnpm run test
+pnpm run start
+```
+
+Package:
 
 ```bash
 pnpm run dist:mac
+pnpm run dist:win
 ```
 
-Output: `out/MultiClaude-1.0.0-arm64.dmg` (and/or x64)
+## Project Structure
 
-## Usage Guide
+- `src/main/`: Electron main process (IPC, PTY, config store, env builder, protocol/worktree services)
+- `src/preload/`: secure bridge API
+- `src/renderer/`: UI, state store, components
+- `src/shared/`: shared types/constants
 
-### 1. Create a Config
+## Repository
 
-Launch MultiClaude. On first launch you'll see the welcome screen.
-
-Click **Create Your First Config** and fill in:
-
-- **Name** — A descriptive name (e.g. "Opus 4.6 Direct", "Kimi K2.5 via Proxy")
-- **Color** — Pick a color to visually distinguish this config
-- **Model** — The model identifier (e.g. `claude-opus-4-6`, `kimi-k2.5`)
-- **Base URL** — API endpoint (e.g. `https://api.anthropic.com`, `https://api.kimi.com/coding/`)
-- **Auth Token** — Your API key or auth token
-- **Custom Env Vars** — Any additional env vars needed (click "+ Add Variable")
-
-Click **Create**.
-
-### 2. Open an Embedded Terminal
-
-Select a config in the sidebar (single click to select). Then:
-
-- Click the **Terminal** button on the config, or
-- Press `Cmd+T`
-
-A new terminal tab opens with all config env vars injected. Run `claude` and it will use the configured model.
-
-Verify with:
-
-```bash
-env | grep ANTHROPIC
-```
-
-### 3. Open a System Terminal
-
-Click the **System** button on a config. macOS Terminal.app opens a new window with the env vars loaded. You'll see a confirmation:
-
-```
-[MultiClaude] Config loaded: Kimi K2.5
-```
-
-### 4. Manage Multiple Terminals
-
-- **Switch tabs**: Click tabs or use `Cmd+Shift+]` / `Cmd+Shift+[`
-- **Go to tab N**: `Cmd+1` through `Cmd+9`
-- **Close tab**: Click the X on the tab or `Cmd+W`
-- **Clear terminal**: `Cmd+K`
-
-### 5. Import / Export Configs
-
-- **Export**: Menu > Config > Export Configs — saves all configs to a JSON file
-- **Import**: Menu > Config > Import Configs — loads configs from a JSON file, auto-renames duplicates
-
-**Note**: Exported files contain auth tokens in plaintext. Handle with care.
-
-### Keyboard Shortcuts
-
-| Shortcut              | Action                                    |
-| --------------------- | ----------------------------------------- |
-| `Cmd+T`             | New embedded terminal for selected config |
-| `Cmd+Shift+T`       | New system terminal for selected config   |
-| `Cmd+W`             | Close active terminal tab                 |
-| `Cmd+N`             | New config                                |
-| `Cmd+E`             | Edit selected config                      |
-| `Cmd+D`             | Duplicate selected config                 |
-| `Cmd+K`             | Clear terminal                            |
-| `Cmd+B`             | Toggle sidebar                            |
-| `Cmd+Shift+]`       | Next tab                                  |
-| `Cmd+Shift+[`       | Previous tab                              |
-| `Cmd+1`..`Cmd+9`  | Go to tab N                               |
-| `Cmd+=` / `Cmd+-` | Zoom in / out                             |
-| `Cmd+0`             | Reset zoom                                |
-
-### Right-Click Context Menu
-
-Right-click in a terminal for:
-
-- Copy / Paste / Select All
-- Clear Terminal
-- Open System Terminal (with same config)
-
-## Tech Stack
-
-| Component | Technology                                        |
-| --------- | ------------------------------------------------- |
-| Framework | Electron 34                                       |
-| Language  | TypeScript 5.7                                    |
-| Terminal  | @xterm/xterm 5.5 + addons (fit, webgl, web-links) |
-| PTY       | node-pty                                          |
-| Bundler   | esbuild                                           |
-| Packaging | electron-builder                                  |
-| UI        | Vanilla TypeScript (no framework)                 |
-
-## Development
-
-```bash
-# Install dependencies
-pnpm install
-
-# Build once
-node scripts/build.js
-
-# Run in dev mode
-npx electron .
-
-# Build distributable
-pnpm run dist:mac
-```
-
-## Contributing
-
-Contributions are welcome! If you find a bug, have a feature request, or want to improve MultiClaude:
-
-- **Report Issues** — Open an [Issue](https://github.com/zkkython/MultiClaude/issues) to report bugs or suggest features
-- **Submit PRs** — Fork the repo, make your changes, and open a Pull Request
-- **Share Ideas** — Start a [Discussion](https://github.com/zkkython/MultiClaude/discussions) for questions or ideas
-
-All contributions, big or small, are appreciated.
-
-## License
-
-Apache 2.0
+- Source: https://github.com/zkkython/MultiClaude
+- Issues: https://github.com/zkkython/MultiClaude/issues

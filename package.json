@@ -1,16 +1,22 @@
 {
   "name": "multiclaude",
-  "version": "1.0.3",
+  "version": "1.0.7",
   "description": "Run multiple Claude Code configurations in parallel terminals",
   "main": "dist/main/index.js",
   "scripts": {
     "dev": "node scripts/dev.js",
     "build": "node scripts/build.js",
-    "start": "electron dist/main/index.js",
+    "smoke": "node scripts/smoke.js",
+    "eval:protocol": "node scripts/eval-protocol.js",
+    "start": "node scripts/start.js",
     "postinstall": "electron-rebuild",
     "dist": "npm run build && electron-builder",
-    "dist:mac": "npm run build && electron-builder --mac",
-    "dist:win": "npm run build && electron-builder --win"
+    "dist:mac": "npm run build && node scripts/dist-mac-keychain.js",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:mac:p12": "npm run build && electron-builder --mac",
+    "dist:mac:nonotarize": "npm run build && node scripts/dist-mac-nonotarize.js",
+    "notarize:mac": "node scripts/notarize-mac-dmg.js",
+    "test": "node scripts/test.js"
   },
   "author": "kason",
   "license": "MIT",

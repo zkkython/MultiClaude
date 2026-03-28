@@ -15,6 +15,21 @@ export const IPC = {
   TERMINAL_KILL: 'terminal:kill',
   TERMINAL_DATA: 'terminal:data',
   TERMINAL_EXIT: 'terminal:exit',
+  TERMINAL_STATE: 'terminal:state',
+  TERMINAL_STATE_SNAPSHOT_GET: 'terminal:state-snapshot:get',
+  RUNNER_SESSION_START: 'runner:session:start',
+  RUNNER_EVENT_INGEST: 'runner:event:ingest',
+  RUNNER_INPUT_RESOLVE: 'runner:input:resolve',
+  RUNNER_INPUT_SUBMIT: 'runner:input:submit',
+  RUNNER_SESSION_INTERRUPT: 'runner:session:interrupt',
+  RUNNER_SESSION_STOP: 'runner:session:stop',
+  RUNNER_SESSION_END: 'runner:session:end',
+  RUNNER_EVENT: 'runner:event',
+  RUNNER_METRICS_GET: 'runner:metrics:get',
+  RUNNER_METRICS_RESET: 'runner:metrics:reset',
+  RUNNER_CONNECTIVITY_TEST: 'runner:connectivity:test',
+  RUNNER_CLAUDE_HOOKS_STATUS_GET: 'runner:claude-hooks:status:get',
+  RUNNER_CLAUDE_HOOKS_INSTALL: 'runner:claude-hooks:install',
 
   SYSTEM_TERMINAL_OPEN: 'system-terminal:open',
 
@@ -24,6 +39,18 @@ export const IPC = {
   APP_NOTIFICATION: 'app:notification',
   APP_GET_SETTINGS: 'app:get-settings',
   APP_SAVE_SETTINGS: 'app:save-settings',
+  APP_SELECT_DIRECTORY: 'app:select-directory',
+  APP_ENSURE_DIRECTORY: 'app:ensure-directory',
+  APP_WRITE_TEXT_FILE: 'app:write-text-file',
+  APP_SET_IGNORE_MENU_SHORTCUTS: 'app:set-ignore-menu-shortcuts',
+
+  WORKTREE_LIST: 'worktree:list',
+  WORKTREE_CREATE: 'worktree:create',
+  WORKTREE_REMOVE: 'worktree:remove',
+  WORKTREE_PRUNE: 'worktree:prune',
+  WORKTREE_STATUS: 'worktree:status',
+  WORKTREE_MERGE_READINESS: 'worktree:merge-readiness',
+  WORKTREE_MERGE_TEMPLATE: 'worktree:merge-template',
 } as const;
 
 // Default values
