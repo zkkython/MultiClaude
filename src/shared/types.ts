@@ -136,6 +136,7 @@ export interface WorktreeCreateInput {
   worktreePath: string;
   branchName: string;
   fromRef?: string;
+  useExistingBranch?: boolean;
 }
 
 export interface WorktreeRemoveInput {

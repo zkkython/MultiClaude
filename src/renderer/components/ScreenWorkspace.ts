@@ -416,15 +416,23 @@ export function createScreenWorkspace(callbacks: ScreenWorkspaceCallbacks): HTML
     terminalHost.className = 'screen-pane-terminal';
     pane.appendChild(terminalHost);
 
-    pane.addEventListener('click', (ev) => {
-      const target = ev.target as HTMLElement;
-      if (target.closest('.screen-pane-tabs')) return;
+    const activatePaneTerminal = () => {
       setActiveScreen(screenId);
       const current = getState().screens.find(item => item.id === screenId);
-      const nextActiveTab = current?.activeTabId || current?.tabs[0]?.id;
+      const nextActiveTab = terminalHost.dataset.tabId || current?.activeTabId || current?.tabs[0]?.id;
       if (nextActiveTab) {
         setActiveTab(nextActiveTab);
       }
+    };
+
+    terminalHost.addEventListener('pointerdown', () => {
+      activatePaneTerminal();
+    }, true);
+
+    pane.addEventListener('click', (ev) => {
+      const target = ev.target as HTMLElement;
+      if (target.closest('.screen-pane-tabs')) return;
+      activatePaneTerminal();
     });
 
     const entry: PaneCacheEntry = {

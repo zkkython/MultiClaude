@@ -1362,13 +1362,15 @@ function syncVisibleTerminals(root?: HTMLElement): void {
     activeEl?.closest('.screen-pane-tab-input')
     || activeEl?.closest('.screen-pane-group-input'),
   );
-  if (isInlineEditing && (activeEl?.closest('.terminal-view') || activeEl?.closest('.xterm'))) {
+  const hasOpenModal = Boolean(document.querySelector('.modal-overlay'));
+  const shouldPauseTerminalFocus = isInlineEditing || hasOpenModal;
+  if (shouldPauseTerminalFocus && (activeEl?.closest('.terminal-view') || activeEl?.closest('.xterm'))) {
     activeEl.blur();
   }
-  if (isInlineEditing) {
+  if (shouldPauseTerminalFocus) {
     blurAllTerminals();
   }
-  showTerminals(visibleTabIds, getState().activeTabId, !isInlineEditing);
+  showTerminals(visibleTabIds, getState().activeTabId, !shouldPauseTerminalFocus);
 }
 
 subscribe(() => {

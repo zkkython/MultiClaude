@@ -1905,6 +1905,16 @@ html, body {
   user-select: none;
 }
 
+.wt-existing-branch-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+  user-select: none;
+}
+
 .worktree-row {
   display: flex;
   justify-content: space-between;

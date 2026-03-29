@@ -185,8 +185,7 @@ export function showTerminal(tabId: string): void {
   const instance = instances.get(tabId);
   if (instance) {
     requestAnimationFrame(() => {
-      instance.fitAddon.fit();
-      instance.terminal.focus();
+      focusTerminalWithRetry(instance);
     });
   }
 }
@@ -210,10 +209,11 @@ export function showTerminals(
     return;
   }
   requestAnimationFrame(() => {
-    focused.fitAddon.fit();
     if (shouldAutoFocusTerminal(shouldFocus)) {
-      focused.terminal.focus();
+      focusTerminalWithRetry(focused);
+      return;
     }
+    focused.fitAddon.fit();
   });
 }
 
@@ -339,6 +339,20 @@ async function setIgnoreMenuShortcuts(ignore: boolean): Promise<void> {
   } catch (err) {
     console.warn('Failed to toggle menu shortcut passthrough:', err);
   }
+}
+
+function focusTerminalWithRetry(instance: TerminalInstance): void {
+  const tryFocus = (attempt: number) => {
+    instance.fitAddon.fit();
+    instance.terminal.focus();
+    requestAnimationFrame(() => {
+      const activeEl = document.activeElement as HTMLElement | null;
+      const focused = Boolean(activeEl && instance.container.contains(activeEl));
+      if (focused || attempt >= 2) return;
+      setTimeout(() => tryFocus(attempt + 1), 0);
+    });
+  };
+  tryFocus(0);
 }
 
 function normalizeCaretControlNotation(data: string): string {

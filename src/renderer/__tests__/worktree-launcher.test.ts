@@ -36,6 +36,9 @@ test('worktree launcher markup exposes dual tabs and step-oriented copy', () => 
   assert.match(html, /id="wt-filter-dirty"/);
   assert.match(html, /id="wt-filter-unknown"/);
   assert.match(html, /id="wt-compact-toggle"/);
+  assert.match(html, /id="wt-use-existing-branch"/);
+  assert.match(html, /id="wt-create-mode-help"/);
+  assert.match(html, /Use existing branch \(open branch as new worktree\)/);
   assert.doesNotMatch(html, /id="wt-branch-name"[^>]*(?:readonly|disabled)/);
   assert.doesNotMatch(html, /id="wt-path-name"[^>]*(?:readonly|disabled)/);
   assert.doesNotMatch(html, /id="wt-from-ref"[^>]*(?:readonly|disabled)/);

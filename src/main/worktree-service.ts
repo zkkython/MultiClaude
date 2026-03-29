@@ -28,15 +28,12 @@ export async function listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
 }
 
 export async function createWorktree(input: WorktreeCreateInput): Promise<WorktreeInfo> {
+  const branchName = input.branchName.trim();
   const fromRef = (input.fromRef || 'HEAD').trim();
-  const result = await gitRunner(input.repoPath, [
-    'worktree',
-    'add',
-    '-b',
-    input.branchName.trim(),
-    input.worktreePath,
-    fromRef,
-  ]);
+  const args = input.useExistingBranch
+    ? ['worktree', 'add', input.worktreePath, branchName]
+    : ['worktree', 'add', '-b', branchName, input.worktreePath, fromRef];
+  const result = await gitRunner(input.repoPath, args);
   if (result.code !== 0) {
     throw new Error(result.stderr || `git worktree add failed with code ${result.code}`);
   }
@@ -45,7 +42,7 @@ export async function createWorktree(input: WorktreeCreateInput): Promise<Worktr
   if (!created) {
     return {
       path: input.worktreePath,
-      branch: input.branchName.trim(),
+      branch: branchName,
       bare: false,
       detached: false,
       locked: false,

@@ -70,7 +70,11 @@ export function buildWorktreeLauncherMarkup(configName: string, repoPath: string
             <input id="wt-from-ref" type="text" value="HEAD" placeholder="from ref (default HEAD)" />
             <button type="button" class="btn btn-primary" id="wt-create-open">Create + Open Terminal</button>
           </div>
-          <div class="form-help">Default strategy creates a new branch from current HEAD.</div>
+          <label class="wt-existing-branch-toggle">
+            <input type="checkbox" id="wt-use-existing-branch" />
+            Use existing branch (open branch as new worktree)
+          </label>
+          <div class="form-help" id="wt-create-mode-help">Default strategy creates a new branch from current HEAD.</div>
         </div>
         <div class="form-group">
           <label>Existing Worktrees</label>
@@ -174,6 +178,8 @@ export function showWorktreeLauncher(options: WorktreeLauncherOptions): void {
   const branchInput = modal.querySelector('#wt-branch-name') as HTMLInputElement;
   const pathInput = modal.querySelector('#wt-path-name') as HTMLInputElement;
   const fromRefInput = modal.querySelector('#wt-from-ref') as HTMLInputElement;
+  const useExistingBranchInput = modal.querySelector('#wt-use-existing-branch') as HTMLInputElement;
+  const createModeHelp = modal.querySelector('#wt-create-mode-help') as HTMLElement;
   const mergeSourceInput = modal.querySelector('#wt-merge-source') as HTMLInputElement;
   const mergeStrategyInput = modal.querySelector('#wt-merge-strategy') as HTMLSelectElement;
   const templatePreview = modal.querySelector('#wt-template-preview') as HTMLElement;
@@ -202,6 +208,7 @@ export function showWorktreeLauncher(options: WorktreeLauncherOptions): void {
 
   branchInput.value = defaultBranchName();
   pathInput.value = defaultPathName(branchInput.value);
+  syncCreateModeUI();
 
   repoInput.addEventListener('input', () => {
     repoPath = repoInput.value.trim();
@@ -215,6 +222,9 @@ export function showWorktreeLauncher(options: WorktreeLauncherOptions): void {
     if (!pathInput.value.trim()) {
       pathInput.value = defaultPathName(branchInput.value);
     }
+  });
+  useExistingBranchInput.addEventListener('change', () => {
+    syncCreateModeUI();
   });
   mergeStrategyInput.addEventListener('change', () => {
     void updateMergePreview();
@@ -253,6 +263,7 @@ export function showWorktreeLauncher(options: WorktreeLauncherOptions): void {
         worktreePath,
         branchName,
         fromRef: fromRefInput.value.trim() || 'HEAD',
+        useExistingBranch: useExistingBranchInput.checked,
       });
       await options.onPersistDefaults(repoPath, targetRef);
       options.onOpenTerminal(created.path, branchName);
@@ -362,11 +373,13 @@ export function showWorktreeLauncher(options: WorktreeLauncherOptions): void {
   });
   branchInput.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
+    if (isImeComposingKeyEvent(e)) return;
     e.preventDefault();
     (modal.querySelector('#wt-create-open') as HTMLButtonElement | null)?.click();
   });
   mergeSourceInput.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
+    if (isImeComposingKeyEvent(e)) return;
     e.preventDefault();
     (modal.querySelector('#wt-copy-template') as HTMLButtonElement | null)?.click();
   });
@@ -374,6 +387,18 @@ export function showWorktreeLauncher(options: WorktreeLauncherOptions): void {
   function close() {
     teardownDialogA11y();
     overlay.remove();
+  }
+
+  function syncCreateModeUI(): void {
+    const useExisting = useExistingBranchInput.checked;
+    fromRefInput.disabled = useExisting;
+    if (useExisting) {
+      fromRefInput.title = 'Existing-branch mode does not use from-ref.';
+      createModeHelp.textContent = 'Existing-branch mode opens an already-created branch in a new worktree.';
+      return;
+    }
+    fromRefInput.title = '';
+    createModeHelp.textContent = 'Default strategy creates a new branch from current HEAD.';
   }
 
   async function refresh(): Promise<void> {
@@ -783,6 +808,9 @@ function toActionableMessage(message: string): string {
   if (/ECONNREFUSED|ENOTFOUND|network/i.test(normalized)) {
     return `${normalized}. Check network connectivity and service availability, then retry.`;
   }
+  if (/already exists/i.test(normalized) && /branch/i.test(normalized)) {
+    return `${normalized}. Enable "Use existing branch" to open that branch as a new worktree.`;
+  }
   return `${normalized}. Check input values and repository state, then retry.`;
 }
 
@@ -795,6 +823,9 @@ function getErrorHelpText(message: string): string | null {
   }
   if (/dirty_tree/i.test(message) || /uncommitted changes/i.test(message)) {
     return 'Git blocks worktree removal when there are local changes to prevent accidental data loss.';
+  }
+  if (/already exists/i.test(message) && /branch/i.test(message)) {
+    return 'Branch names are unique. If the branch already exists, switch to "Use existing branch" instead of creating a new one.';
   }
   if (/required/i.test(message)) {
     return 'Some required inputs are missing, so the command cannot be generated or executed safely.';
@@ -812,4 +843,8 @@ function shouldHandleModalShortcut(e: KeyboardEvent, modal: HTMLElement): boolea
     return true;
   }
   return false;
+}
+
+function isImeComposingKeyEvent(e: KeyboardEvent): boolean {
+  return e.isComposing || (e as KeyboardEvent).keyCode === 229;
 }

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   __setGitRunnerForTest,
   buildMergeTemplate,
+  createWorktree,
   getMergeReadiness,
   parseWorktreePorcelain,
   removeWorktree,
@@ -59,6 +60,52 @@ test('removeWorktree blocks dirty tree before git worktree remove', async () => 
     /dirty_tree/
   );
   assert.deepEqual(calls, ['status --porcelain']);
+});
+
+test('createWorktree supports both new and existing branch modes', async () => {
+  const calls: string[] = [];
+  __setGitRunnerForTest(async (_cwd, args) => {
+    calls.push(args.join(' '));
+    if (args[0] === 'worktree' && args[1] === 'add') {
+      return { code: 0, stdout: '', stderr: '' };
+    }
+    if (args[0] === 'worktree' && args[1] === 'list') {
+      return {
+        code: 0,
+        stdout: [
+          'worktree /repo/main',
+          'branch refs/heads/main',
+          '',
+          'worktree /repo/wt-ui',
+          'branch refs/heads/feat/ui-interaction',
+          '',
+          'worktree /repo/wt-tests',
+          'branch refs/heads/feat/unit-test-coverage',
+          '',
+        ].join('\n'),
+        stderr: '',
+      };
+    }
+    return { code: 1, stdout: '', stderr: `unexpected args: ${args.join(' ')}` };
+  });
+
+  const createdNew = await createWorktree({
+    repoPath: '/repo/main',
+    worktreePath: '/repo/wt-ui',
+    branchName: 'feat/ui-interaction',
+    fromRef: 'main',
+  });
+  const createdExisting = await createWorktree({
+    repoPath: '/repo/main',
+    worktreePath: '/repo/wt-tests',
+    branchName: 'feat/unit-test-coverage',
+    useExistingBranch: true,
+  });
+
+  assert.equal(createdNew.branch, 'feat/ui-interaction');
+  assert.equal(createdExisting.branch, 'feat/unit-test-coverage');
+  assert.match(calls[0], /^worktree add -b feat\/ui-interaction \/repo\/wt-ui main$/);
+  assert.match(calls[2], /^worktree add \/repo\/wt-tests feat\/unit-test-coverage$/);
 });
 
 test('getMergeReadiness computes ahead/behind and dirty flags', async () => {
