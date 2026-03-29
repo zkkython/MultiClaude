@@ -2053,6 +2053,11 @@ html, body {
   color: var(--text-muted);
 }
 
+.worktree-hint-chip {
+  margin-left: 6px;
+  cursor: help;
+}
+
 .worktree-template-preview {
   margin-top: 8px;
   padding: 8px 10px;

@@ -129,6 +129,8 @@ export interface WorktreeInfo {
 export interface WorktreeStatus {
   path: string;
   dirty: boolean;
+  modifiedCount: number;
+  untrackedCount: number;
 }
 
 export interface WorktreeCreateInput {
@@ -151,6 +153,8 @@ export interface WorktreeMergeReadiness {
   ahead: number;
   behind: number;
   dirty: boolean;
+  modifiedCount: number;
+  untrackedCount: number;
   confidence: 'high' | 'low';
 }
 

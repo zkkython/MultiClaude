@@ -467,16 +467,19 @@ export function showWorktreeLauncher(options: WorktreeLauncherOptions): void {
       const readinessText = readiness
         ? `merge to ${escapeHtml(targetRef)}: ${readiness.ahead} ahead, ${readiness.behind} behind${readiness.dirty ? ', has local changes' : ''}`
         : `merge to ${escapeHtml(targetRef)}: unavailable`;
+      const readinessHints = readiness
+        ? buildReadinessHintTags(readiness, targetRef, item.branch || '(unknown)')
+        : '';
       const selected = selectedWorktreePaths.has(item.path);
       return `
-        <div class="worktree-row${compactRows ? ' is-compact' : ''}" data-worktree-path="${escapeHtml(item.path)}">
+        <div class="worktree-row${compactRows ? ' is-compact' : ''}" data-worktree-path="${escapeHtml(item.path)}" data-worktree-branch="${escapeHtml(item.branch || '')}">
           <label class="worktree-select-cell">
             <input type="checkbox" data-action="select" ${selected ? 'checked' : ''} />
           </label>
           <div class="worktree-meta">
             <div><strong>${escapeHtml(item.branch || '(unknown)')}</strong> ${item.isMain ? '<span class="provider-pill">main</span>' : ''}</div>
             <div class="form-help">${escapeHtml(item.path)}</div>
-            <div class="form-help">${readinessText}</div>
+            <div class="form-help">${readinessText} ${readinessHints}</div>
           </div>
           <div class="worktree-actions">
             <button class="btn btn-sm" data-action="open">Open</button>
@@ -491,12 +494,13 @@ export function showWorktreeLauncher(options: WorktreeLauncherOptions): void {
       const openBtn = row.querySelector('[data-action="open"]');
       const removeBtn = row.querySelector('[data-action="remove"]');
       const selectInput = row.querySelector('[data-action="select"]') as HTMLInputElement | null;
+      const worktreeBranch = (row as HTMLElement).dataset.worktreeBranch?.trim() || undefined;
       selectInput?.addEventListener('change', () => {
         if (selectInput.checked) selectedWorktreePaths.add(worktreePath);
         else selectedWorktreePaths.delete(worktreePath);
         void updateBatchPreview();
       });
-      openBtn?.addEventListener('click', () => options.onOpenTerminal(worktreePath));
+      openBtn?.addEventListener('click', () => options.onOpenTerminal(worktreePath, worktreeBranch));
       removeBtn?.addEventListener('click', async () => {
         if (!confirm(`Remove worktree?\n${worktreePath}`)) return;
         try {
@@ -535,6 +539,8 @@ export function showWorktreeLauncher(options: WorktreeLauncherOptions): void {
     let behind = 0;
     let dirty = 0;
     let unavailable = 0;
+    let dirtyModifiedTotal = 0;
+    let dirtyUntrackedTotal = 0;
     for (const item of worktrees) {
       const readiness = readinessByPath.get(item.path);
       if (!readiness) {
@@ -542,13 +548,17 @@ export function showWorktreeLauncher(options: WorktreeLauncherOptions): void {
         continue;
       }
       if (readiness.behind > 0) behind += 1;
-      if (readiness.dirty) dirty += 1;
+      if (readiness.dirty) {
+        dirty += 1;
+        dirtyModifiedTotal += readiness.modifiedCount;
+        dirtyUntrackedTotal += readiness.untrackedCount;
+      }
       if (readiness.behind === 0 && !readiness.dirty) ready += 1;
     }
     readinessSummaryEl.innerHTML = `
       <span class="summary-chip summary-chip-ok">Ready ${ready}</span>
-      <span class="summary-chip summary-chip-warn">Behind ${behind}</span>
-      <span class="summary-chip summary-chip-warn">Dirty ${dirty}</span>
+      <span class="summary-chip summary-chip-warn" title="${escapeHtml(`${behind} worktree(s) are behind ${targetRef}: target branch has commits not in source branch.`)}">Behind ${behind}</span>
+      <span class="summary-chip summary-chip-warn" title="${escapeHtml(`${dirty} worktree(s) are dirty: ${dirtyModifiedTotal} modified + ${dirtyUntrackedTotal} untracked file(s).`)}">Dirty ${dirty}</span>
       <span class="summary-chip summary-chip-muted">Unknown ${unavailable}</span>
       <span class="summary-chip summary-chip-muted">Selected ${selectedWorktreePaths.size}</span>
     `;
@@ -852,4 +862,23 @@ function shouldHandleModalShortcut(e: KeyboardEvent, modal: HTMLElement): boolea
 
 function isImeComposingKeyEvent(e: KeyboardEvent): boolean {
   return e.isComposing || (e as KeyboardEvent).keyCode === 229;
+}
+
+function buildReadinessHintTags(readiness: WorktreeMergeReadiness, targetRef: string, branchName: string): string {
+  const hints: string[] = [];
+  if (readiness.behind > 0) {
+    hints.push(
+      `<span class="summary-chip summary-chip-warn worktree-hint-chip" title="${escapeHtml(
+        `${branchName} is ${readiness.behind} commit(s) behind ${targetRef}. Bring ${targetRef} into ${branchName} via merge/rebase before final merge.`
+      )}">Behind reason</span>`
+    );
+  }
+  if (readiness.dirty) {
+    hints.push(
+      `<span class="summary-chip summary-chip-warn worktree-hint-chip" title="${escapeHtml(
+        `${branchName} has local changes: ${readiness.modifiedCount} modified + ${readiness.untrackedCount} untracked file(s). Commit, stash, or clean before merge/remove operations.`
+      )}">Dirty reason</span>`
+    );
+  }
+  return hints.join(' ');
 }

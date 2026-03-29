@@ -76,9 +76,12 @@ export async function getWorktreeStatus(worktreePath: string): Promise<WorktreeS
   if (result.code !== 0) {
     throw new Error(result.stderr || `git status failed with code ${result.code}`);
   }
+  const summary = summarizeStatusPorcelain(result.stdout);
   return {
     path: worktreePath,
-    dirty: result.stdout.trim().length > 0,
+    dirty: summary.modifiedCount + summary.untrackedCount > 0,
+    modifiedCount: summary.modifiedCount,
+    untrackedCount: summary.untrackedCount,
   };
 }
 
@@ -102,6 +105,8 @@ export async function getMergeReadiness(worktreePath: string, targetRef: string)
     ahead: Number.isFinite(ahead) ? ahead : 0,
     behind: Number.isFinite(behind) ? behind : 0,
     dirty: status.dirty,
+    modifiedCount: status.modifiedCount,
+    untrackedCount: status.untrackedCount,
     confidence: 'high',
   };
 }
@@ -250,4 +255,23 @@ export function __setGitRunnerForTest(runner: GitRunner | null): void {
 
 function shellEscape(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function summarizeStatusPorcelain(stdout: string): { modifiedCount: number; untrackedCount: number } {
+  let modifiedCount = 0;
+  let untrackedCount = 0;
+  for (const rawLine of stdout.split('\n')) {
+    if (!rawLine) continue;
+    const line = rawLine.trimEnd();
+    if (!line) continue;
+    const x = line[0] || ' ';
+    const y = line[1] || ' ';
+    if (x === '?' && y === '?') {
+      untrackedCount += 1;
+      continue;
+    }
+    if (x === '!' && y === '!') continue;
+    modifiedCount += 1;
+  }
+  return { modifiedCount, untrackedCount };
 }

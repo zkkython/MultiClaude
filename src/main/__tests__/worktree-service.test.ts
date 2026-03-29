@@ -132,6 +132,8 @@ test('getMergeReadiness computes ahead/behind and dirty flags', async () => {
   assert.equal(readiness.behind, 2);
   assert.equal(readiness.ahead, 5);
   assert.equal(readiness.dirty, false);
+  assert.equal(readiness.modifiedCount, 0);
+  assert.equal(readiness.untrackedCount, 0);
 });
 
 test('listWorktrees parses porcelain and surfaces git list failures', async () => {
@@ -237,6 +239,8 @@ test('status and prune helpers propagate success and failures', async () => {
   const status = await getWorktreeStatus('/repo/wt-a');
   assert.equal(status.path, '/repo/wt-a');
   assert.equal(status.dirty, true);
+  assert.equal(status.modifiedCount, 0);
+  assert.equal(status.untrackedCount, 1);
   await pruneWorktrees('/repo/main');
 
   __setGitRunnerForTest(async (_cwd, args) => {
@@ -289,6 +293,8 @@ test('getMergeReadiness falls back to detached HEAD and normalizes invalid count
   assert.equal(readiness.targetRef, 'main');
   assert.equal(readiness.behind, 0);
   assert.equal(readiness.ahead, 0);
+  assert.equal(readiness.modifiedCount, 0);
+  assert.equal(readiness.untrackedCount, 0);
 
   __setGitRunnerForTest(async (_cwd, args) => {
     const key = args.join(' ');
