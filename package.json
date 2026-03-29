@@ -35,5 +35,12 @@
     "@xterm/xterm": "^5.5.0",
     "nanoid": "^5.0.9",
     "node-pty": "^1.1.0-beta22"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild",
+      "node-pty"
+    ]
   }
 }

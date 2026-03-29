@@ -57,7 +57,7 @@ export function showBatchStressLauncher(options: BatchStressLauncherOptions): vo
   modal.innerHTML = `
     <div class="modal-header">
       <h2>Batch Stress · ${escapeHtml(options.config.name)}</h2>
-      <button class="btn btn-icon modal-close-btn">✕</button>
+      <button class="btn btn-icon modal-close-btn" aria-label="Close dialog">✕</button>
     </div>
     <div class="modal-body">
       <div class="task-brief task-brief-worktree">
@@ -65,37 +65,37 @@ export function showBatchStressLauncher(options: BatchStressLauncherOptions): vo
         <div class="task-brief-done">Done when all instances complete and summary is stable.</div>
       </div>
       <div class="form-group">
-        <label>Root Directory</label>
+        <label for="bs-root-dir">Root Directory</label>
         <div class="input-with-toggle">
           <input id="bs-root-dir" type="text" value="${escapeHtml(options.initialRootDir)}" placeholder="/path/to/root" />
           <button type="button" class="btn btn-secondary" id="bs-browse">Browse</button>
         </div>
       </div>
       <div class="form-group">
-        <label>Job Name</label>
+        <label for="bs-job-name">Job Name</label>
         <input id="bs-job-name" type="text" value="stress-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}" />
       </div>
       <div class="batch-stress-grid">
         <div class="form-group">
-          <label>Count (N)</label>
+          <label for="bs-count">Count (N)</label>
           <input id="bs-count" type="number" min="1" max="200" value="5" />
         </div>
         <div class="form-group">
-          <label>Concurrency</label>
+          <label for="bs-concurrency">Concurrency</label>
           <input id="bs-concurrency" type="number" min="1" max="64" value="3" />
         </div>
         <div class="form-group">
-          <label>Subdir Pattern</label>
+          <label for="bs-subdir-pattern">Subdir Pattern</label>
           <input id="bs-subdir-pattern" type="text" value="run-\${index}" />
           <div class="form-help">Supports \${index}, \${configName}.</div>
         </div>
         <div class="form-group">
-          <label>Bootstrap Command</label>
+          <label for="bs-bootstrap">Bootstrap Command</label>
           <input id="bs-bootstrap" type="text" value="claude" />
         </div>
       </div>
       <div class="form-group">
-        <label>Send Delay (ms)</label>
+        <label for="bs-send-delay">Send Delay (ms)</label>
         <input id="bs-send-delay" type="number" min="0" max="10000" value="300" />
       </div>
       <div class="form-group">
@@ -105,7 +105,7 @@ export function showBatchStressLauncher(options: BatchStressLauncherOptions): vo
         </label>
       </div>
       <div class="form-group">
-        <label>Conversation Script (JSON rounds)</label>
+        <label for="bs-rounds-json">Conversation Script (JSON rounds)</label>
         <textarea id="bs-rounds-json" rows="10">[
   {
     "id": "r1-seed",

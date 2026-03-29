@@ -28,7 +28,7 @@ export function showPreflightDialog(input: {
   modal.innerHTML = `
     <div class="modal-header">
       <h2>Preflight Check · ${escapeHtml(input.configName)}</h2>
-      <button class="btn btn-icon modal-close-btn">✕</button>
+      <button class="btn btn-icon modal-close-btn" aria-label="Close dialog">✕</button>
     </div>
     <div class="modal-body">
       ${blockers.length > 0 ? `

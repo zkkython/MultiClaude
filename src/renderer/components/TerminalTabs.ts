@@ -90,6 +90,100 @@ export function createTerminalTabs(
     }
   }, { capture: true });
 
+  const focusTabById = (tabId: string) => {
+    requestAnimationFrame(() => {
+      const tabMain = scrollContainer.querySelector(`.tab-main[data-tab-id="${tabId}"]`) as HTMLElement | null;
+      tabMain?.focus();
+    });
+  };
+
+  scrollContainer.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+
+    const closeButton = target.closest('.tab-close') as HTMLElement | null;
+    if (closeButton) {
+      e.stopPropagation();
+      const tabEl = closeButton.closest('.tab') as HTMLElement | null;
+      const tabId = tabEl?.dataset.tabId;
+      if (tabId) onTabClose(tabId);
+      return;
+    }
+
+    const toggleButton = target.closest('.tab-group-toggle') as HTMLElement | null;
+    if (toggleButton) {
+      e.stopPropagation();
+      const headerEl = toggleButton.closest('.tab-group-header') as HTMLElement | null;
+      const groupId = headerEl?.dataset.groupId;
+      if (groupId) {
+        toggleGroupCollapse(groupId);
+        onGroupsChanged();
+      }
+      return;
+    }
+
+    if (target.closest('.tab-name-input') || target.closest('.tab-group-name-input')) return;
+    const tabMain = target.closest('.tab-main') as HTMLElement | null;
+    const tabId = tabMain?.dataset.tabId;
+    if (!tabId) return;
+    onTabSelect(tabId);
+  });
+
+  scrollContainer.addEventListener('keydown', (e) => {
+    const target = e.target as HTMLElement;
+    const tabMain = target.closest('.tab-main') as HTMLElement | null;
+    if (!tabMain) return;
+    if (target.closest('.tab-name-input') || target.closest('.tab-group-name-input')) return;
+    if (target.closest('.tab-close')) return;
+
+    const tabId = tabMain.dataset.tabId;
+    if (!tabId) return;
+
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onTabSelect(tabId);
+      return;
+    }
+
+    const tabMains = Array.from(scrollContainer.querySelectorAll('.tab-main')) as HTMLElement[];
+    if (!tabMains.length) return;
+    const currentIndex = tabMains.findIndex(el => el.dataset.tabId === tabId);
+    if (currentIndex < 0) return;
+
+    let nextIndex: number | null = null;
+    if (e.key === 'ArrowRight') {
+      nextIndex = (currentIndex + 1) % tabMains.length;
+    } else if (e.key === 'ArrowLeft') {
+      nextIndex = (currentIndex - 1 + tabMains.length) % tabMains.length;
+    } else if (e.key === 'Home') {
+      nextIndex = 0;
+    } else if (e.key === 'End') {
+      nextIndex = tabMains.length - 1;
+    }
+    if (nextIndex === null) return;
+    e.preventDefault();
+    const nextTabId = tabMains[nextIndex].dataset.tabId;
+    if (!nextTabId) return;
+    onTabSelect(nextTabId);
+    focusTabById(nextTabId);
+  });
+
+  scrollContainer.addEventListener('contextmenu', (e) => {
+    const target = e.target as HTMLElement;
+    const tabEl = target.closest('.tab') as HTMLElement | null;
+    if (tabEl?.dataset.tabId) {
+      e.preventDefault();
+      e.stopPropagation();
+      showTabContextMenu(tabEl.dataset.tabId, e as MouseEvent);
+      return;
+    }
+    const headerEl = target.closest('.tab-group-header') as HTMLElement | null;
+    if (headerEl?.dataset.groupId) {
+      e.preventDefault();
+      e.stopPropagation();
+      showGroupContextMenu(headerEl.dataset.groupId, e as MouseEvent);
+    }
+  });
+
   scrollContainer.addEventListener('dragover', (e) => {
     if (!draggedTabId) return;
     if ((e.target as HTMLElement).closest('.tab')) return;
@@ -108,6 +202,55 @@ export function createTerminalTabs(
     }
   });
 
+  scrollContainer.addEventListener('dragstart', (e) => {
+    const target = e.target as HTMLElement;
+    const tabEl = target.closest('.tab') as HTMLElement | null;
+    if (!tabEl?.dataset.tabId) return;
+    draggedTabId = tabEl.dataset.tabId;
+    tabEl.classList.add('dragging');
+    const evt = e as DragEvent;
+    if (evt.dataTransfer) {
+      evt.dataTransfer.effectAllowed = 'move';
+      evt.dataTransfer.setData('text/plain', draggedTabId);
+    }
+  });
+
+  scrollContainer.addEventListener('dragover', (e) => {
+    if (!draggedTabId) return;
+    const target = e.target as HTMLElement;
+    const tabEl = target.closest('.tab') as HTMLElement | null;
+    if (!tabEl?.dataset.tabId || tabEl.dataset.tabId === draggedTabId) return;
+    e.preventDefault();
+    const rect = tabEl.getBoundingClientRect();
+    const mouseX = (e as DragEvent).clientX;
+    const placeAfter = mouseX > rect.left + rect.width / 2;
+    scrollContainer.querySelectorAll('.tab').forEach(el => {
+      if (el === tabEl) return;
+      (el as HTMLElement).classList.remove('drop-before', 'drop-after');
+    });
+    tabEl.classList.toggle('drop-before', !placeAfter);
+    tabEl.classList.toggle('drop-after', placeAfter);
+  });
+
+  scrollContainer.addEventListener('drop', (e) => {
+    if (!draggedTabId) return;
+    const target = e.target as HTMLElement;
+    const tabEl = target.closest('.tab') as HTMLElement | null;
+    if (!tabEl?.dataset.tabId || tabEl.dataset.tabId === draggedTabId) return;
+    e.preventDefault();
+    const rect = tabEl.getBoundingClientRect();
+    const mouseX = (e as DragEvent).clientX;
+    const placeAfter = mouseX > rect.left + rect.width / 2;
+    moveTabRelative(draggedTabId, tabEl.dataset.tabId, placeAfter);
+  });
+
+  scrollContainer.addEventListener('dragend', () => {
+    draggedTabId = null;
+    scrollContainer.querySelectorAll('.tab').forEach(el => {
+      (el as HTMLElement).classList.remove('dragging', 'drop-before', 'drop-after');
+    });
+  });
+
   let editingTabId: string | null = null;
   let editingGroupId: string | null = null;
   let lastNameClickTime = 0;
@@ -118,6 +261,7 @@ export function createTerminalTabs(
   let prevGroupsRef: TabGroup[] | null = null;
   let prevActiveTabId: string | null = null;
   let prevRuntimeStatesRef: unknown = null;
+  let lastRenderedMarkup = '';
 
   // Close any open context menu
   function closeContextMenu() {
@@ -183,9 +327,11 @@ export function createTerminalTabs(
   function render() {
     const state = getState();
     const { tabs, activeTabId, groups } = state;
+    const tabsById = new Map(tabs.map(tab => [tab.id, tab] as const));
 
     if (tabs.length === 0) {
       scrollContainer.innerHTML = '';
+      lastRenderedMarkup = '';
       editingTabId = null;
       editingGroupId = null;
       return;
@@ -230,7 +376,7 @@ export function createTerminalTabs(
     for (let gi = 0; gi < groups.length; gi++) {
       const group = groups[gi];
       const waitingCount = group.tabIds.reduce((acc, tid) => {
-        const tab = tabs.find(t => t.id === tid);
+        const tab = tabsById.get(tid);
         if (!tab) return acc;
         return getTabEffectiveState(tab) === 'waiting' ? acc + 1 : acc;
       }, 0);
@@ -241,7 +387,7 @@ export function createTerminalTabs(
       html += renderGroupHeader(group, waitingCount);
       if (!group.collapsed) {
         for (const tid of group.tabIds) {
-          const tab = tabs.find(t => t.id === tid);
+          const tab = tabsById.get(tid);
           if (tab) html += renderTab(tab, tab.id === activeTabId);
         }
       }
@@ -255,91 +401,19 @@ export function createTerminalTabs(
       }
     }
 
-    scrollContainer.innerHTML = html;
+    const hasInlineEditor = Boolean(scrollContainer.querySelector('.tab-name-input, .tab-group-name-input'));
+    const shouldPatchMarkup = hasInlineEditor || html !== lastRenderedMarkup;
+    if (shouldPatchMarkup) {
+      scrollContainer.innerHTML = html;
+      lastRenderedMarkup = html;
+    }
 
-    // Bind tab events
-    scrollContainer.querySelectorAll('.tab').forEach(tabEl => {
-      const tabId = (tabEl as HTMLElement).dataset.tabId!;
-      tabEl.addEventListener('click', (e) => {
-        if ((e.target as HTMLElement).classList.contains('tab-close')) return;
-        if ((e.target as HTMLElement).classList.contains('tab-name-input')) return;
-        onTabSelect(tabId);
-      });
-      tabEl.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter' && e.key !== ' ') return;
-        e.preventDefault();
-        onTabSelect(tabId);
-      });
-      tabEl.querySelector('.tab-close')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        onTabClose(tabId);
-      });
-      tabEl.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        showTabContextMenu(tabId, e as MouseEvent);
-      });
-      tabEl.addEventListener('dragstart', (e) => {
-        const evt = e as DragEvent;
-        draggedTabId = tabId;
-        (tabEl as HTMLElement).classList.add('dragging');
-        if (evt.dataTransfer) {
-          evt.dataTransfer.effectAllowed = 'move';
-          evt.dataTransfer.setData('text/plain', tabId);
-        }
-      });
-      tabEl.addEventListener('dragover', (e) => {
-        if (!draggedTabId || draggedTabId === tabId) return;
-        e.preventDefault();
-        const rect = (tabEl as HTMLElement).getBoundingClientRect();
-        const mouseX = (e as DragEvent).clientX;
-        const placeAfter = mouseX > rect.left + rect.width / 2;
-        (tabEl as HTMLElement).classList.toggle('drop-before', !placeAfter);
-        (tabEl as HTMLElement).classList.toggle('drop-after', placeAfter);
-      });
-      tabEl.addEventListener('dragleave', () => {
-        (tabEl as HTMLElement).classList.remove('drop-before', 'drop-after');
-      });
-      tabEl.addEventListener('drop', (e) => {
-        if (!draggedTabId || draggedTabId === tabId) return;
-        e.preventDefault();
-        const rect = (tabEl as HTMLElement).getBoundingClientRect();
-        const mouseX = (e as DragEvent).clientX;
-        const placeAfter = mouseX > rect.left + rect.width / 2;
-        moveTabRelative(draggedTabId, tabId, placeAfter);
-      });
-      tabEl.addEventListener('dragend', () => {
-        draggedTabId = null;
-        scrollContainer.querySelectorAll('.tab').forEach(el => {
-          (el as HTMLElement).classList.remove('dragging', 'drop-before', 'drop-after');
-        });
-      });
-    });
-
-    // Bind group header events
-    scrollContainer.querySelectorAll('.tab-group-header').forEach(headerEl => {
-      const groupId = (headerEl as HTMLElement).dataset.groupId!;
-      // Click toggle area to collapse/expand
-      headerEl.querySelector('.tab-group-toggle')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        toggleGroupCollapse(groupId);
-        onGroupsChanged();
-      });
-      headerEl.querySelector('.tab-group-toggle')?.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter' && e.key !== ' ') return;
-        e.preventDefault();
-        toggleGroupCollapse(groupId);
-        onGroupsChanged();
-      });
-      headerEl.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        showGroupContextMenu(groupId, e as MouseEvent);
-      });
-    });
+    if (!shouldPatchMarkup) {
+      return;
+    }
 
     // Restore tab editing
-    if (wasEditingTabId && tabs.find(t => t.id === wasEditingTabId)) {
+    if (wasEditingTabId && tabsById.has(wasEditingTabId)) {
       const tabEl = scrollContainer.querySelector(`.tab[data-tab-id="${wasEditingTabId}"]`) as HTMLElement | null;
       if (tabEl) {
         setupTabInput(wasEditingTabId, tabEl, savedTabValue, {
@@ -350,7 +424,8 @@ export function createTerminalTabs(
       }
     }
     // Restore group editing
-    if (wasEditingGroupId && groups.find(g => g.id === wasEditingGroupId)) {
+    const groupIds = new Set(groups.map(group => group.id));
+    if (wasEditingGroupId && groupIds.has(wasEditingGroupId)) {
       const headerEl = scrollContainer.querySelector(`.tab-group-header[data-group-id="${wasEditingGroupId}"]`) as HTMLElement | null;
       if (headerEl) {
         setupGroupInput(wasEditingGroupId, headerEl, savedGroupValue, {
@@ -777,7 +852,7 @@ function renderGroupHeader(group: TabGroup, waitingCount: number): string {
   const waitingBadge = waitingCount > 0 ? `<span class="tab-group-waiting">W${waitingCount}</span>` : '';
   return `
     <div class="tab-group-header ${waitingCount > 0 ? 'tab-group-header-waiting' : ''}" data-group-id="${group.id}" style="--group-color: ${group.color}">
-      <span class="tab-group-toggle" role="button" tabindex="0" aria-label="Toggle group ${escapeHtml(group.name)}">${toggle}</span>
+      <button type="button" class="tab-group-toggle" aria-label="Toggle group ${escapeHtml(group.name)}">${toggle}</button>
       <span class="tab-group-name">${escapeHtml(group.name)}</span>
       <span class="tab-group-count">(${group.tabIds.length})</span>
       ${waitingBadge}
@@ -793,12 +868,14 @@ function renderTab(tab: TerminalTab, isActive: boolean): string {
   const waitingBadge = effectiveState === 'waiting' ? '<span class="tab-waiting-badge">waiting</span>' : '';
   const exitedBadge = tab.status === 'exited' ? '<span class="tab-status-badge">exited</span>' : '';
   return `
-    <div class="tab ${isActive ? 'active' : ''} ${statusClass} ${waitingClass}" data-tab-id="${tab.id}" data-runtime-state="${effectiveState}" draggable="true" role="tab" tabindex="${isActive ? '0' : '-1'}" aria-selected="${isActive ? 'true' : 'false'}" aria-label="${escapeHtml(displayName)}">
-      <span class="tab-color" style="background: ${tab.configColor}"></span>
-      <span class="tab-name">${escapeHtml(displayName)}</span>
-      ${waitingBadge}
-      ${exitedBadge}
-      <button class="tab-close" title="Close">\u2715</button>
+    <div class="tab ${isActive ? 'active' : ''} ${statusClass} ${waitingClass}" data-tab-id="${tab.id}" data-runtime-state="${effectiveState}" draggable="true">
+      <button type="button" class="tab-main" data-tab-id="${tab.id}" role="tab" tabindex="${isActive ? '0' : '-1'}" aria-selected="${isActive ? 'true' : 'false'}" aria-label="${escapeHtml(displayName)}">
+        <span class="tab-color" style="background: ${tab.configColor}"></span>
+        <span class="tab-name">${escapeHtml(displayName)}</span>
+        ${waitingBadge}
+        ${exitedBadge}
+      </button>
+      <button type="button" class="tab-close" title="Close" aria-label="Close tab">\u2715</button>
     </div>
   `;
 }

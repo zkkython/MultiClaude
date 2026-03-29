@@ -27,7 +27,7 @@ export function buildWorktreeLauncherMarkup(configName: string, repoPath: string
       <h2>Worktree · ${escapeHtml(configName)}</h2>
       <div class="modal-header-actions">
         <button class="btn btn-secondary btn-sm" type="button" id="wt-help-toggle">Help</button>
-        <button class="btn btn-icon modal-close-btn">✕</button>
+        <button class="btn btn-icon modal-close-btn" aria-label="Close dialog">✕</button>
       </div>
     </div>
     <div class="modal-body">
@@ -55,7 +55,7 @@ export function buildWorktreeLauncherMarkup(configName: string, repoPath: string
         <div id="wt-feedback-worktree" class="task-feedback" aria-live="polite"></div>
         <p class="worktree-step-hint">Step 1 · Select repository.</p>
         <div class="form-group">
-          <label>Repository Directory</label>
+          <label for="wt-repo-path">Repository Directory</label>
           <div class="input-with-toggle">
             <input id="wt-repo-path" type="text" value="${escapeHtml(repoPath)}" placeholder="/path/to/repo" />
             <button type="button" class="btn btn-secondary" id="wt-browse">Browse</button>
@@ -63,10 +63,13 @@ export function buildWorktreeLauncherMarkup(configName: string, repoPath: string
         </div>
         <p class="worktree-step-hint">Step 2 · Create a new worktree, or choose one from the list.</p>
         <div class="form-group">
-          <label>Create New Worktree</label>
+          <div class="form-section-label">Create New Worktree</div>
           <div class="worktree-create-grid">
+            <label for="wt-branch-name" class="visually-hidden">Branch name</label>
             <input id="wt-branch-name" type="text" placeholder="wt/task-name" />
+            <label for="wt-path-name" class="visually-hidden">Worktree directory name</label>
             <input id="wt-path-name" type="text" placeholder="worktree directory name" />
+            <label for="wt-from-ref" class="visually-hidden">Base reference</label>
             <input id="wt-from-ref" type="text" value="HEAD" placeholder="from ref (default HEAD)" />
             <button type="button" class="btn btn-primary" id="wt-create-open">Create + Open Terminal</button>
           </div>
@@ -77,7 +80,7 @@ export function buildWorktreeLauncherMarkup(configName: string, repoPath: string
           <div class="form-help" id="wt-create-mode-help">Default strategy creates a new branch from current HEAD.</div>
         </div>
         <div class="form-group">
-          <label>Existing Worktrees</label>
+          <div class="form-section-label">Existing Worktrees</div>
           <div id="wt-readiness-summary" class="worktree-readiness-summary">Loading readiness summary...</div>
           <div class="worktree-bulk-actions">
             <button type="button" class="btn btn-secondary btn-sm is-active" id="wt-filter-all">All</button>
@@ -105,19 +108,21 @@ export function buildWorktreeLauncherMarkup(configName: string, repoPath: string
         <div id="wt-feedback-merge" class="task-feedback" aria-live="polite"></div>
         <p class="worktree-step-hint">Step 1 · Choose target branch for readiness and merge.</p>
         <div class="form-group">
-          <label>Merge Target Branch</label>
+          <label for="wt-target-ref">Merge Target Branch</label>
           <input id="wt-target-ref" type="text" value="${escapeHtml(targetRef)}" placeholder="main" />
           <div class="form-help">We check if your source branch is ready to merge into this target branch.</div>
         </div>
         <p class="worktree-step-hint">Step 2 · Choose merge strategy and source ref.</p>
         <div class="form-group">
-          <label>Generate Merge Command</label>
+          <div class="form-section-label">Generate Merge Command</div>
           <div class="worktree-create-grid worktree-merge-grid">
+            <label for="wt-merge-strategy" class="visually-hidden">Merge strategy</label>
             <select id="wt-merge-strategy">
               <option value="merge">merge</option>
               <option value="rebase">rebase</option>
               <option value="squash">squash</option>
             </select>
+            <label for="wt-merge-source" class="visually-hidden">Source branch</label>
             <input id="wt-merge-source" type="text" placeholder="source branch (e.g. wt/task-2026-03-24-0)" />
             <button type="button" class="btn btn-secondary" id="wt-copy-template">Copy Merge Command</button>
           </div>
@@ -125,7 +130,7 @@ export function buildWorktreeLauncherMarkup(configName: string, repoPath: string
           <pre id="wt-template-preview" class="worktree-template-preview">Fill source + target refs to preview command.</pre>
         </div>
         <div class="form-group">
-          <label>Bulk Merge Commands</label>
+          <div class="form-section-label">Bulk Merge Commands</div>
           <div class="worktree-bulk-actions">
             <button type="button" class="btn btn-secondary btn-sm" id="wt-select-ready">Select merge-ready</button>
             <button type="button" class="btn btn-secondary btn-sm" id="wt-clear-selection">Clear selection</button>

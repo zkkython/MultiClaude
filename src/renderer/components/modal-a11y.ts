@@ -69,6 +69,10 @@ function getFocusable(root: HTMLElement): HTMLElement[] {
       const node = el as HTMLElement;
       if (node.hasAttribute('hidden')) return false;
       if (node.getAttribute('aria-hidden') === 'true') return false;
+      if ((node as HTMLInputElement).type === 'hidden') return false;
+      const style = window.getComputedStyle(node);
+      if (style.display === 'none' || style.visibility === 'hidden') return false;
+      if (node.getClientRects().length === 0) return false;
       return true;
     }) as HTMLElement[];
 }

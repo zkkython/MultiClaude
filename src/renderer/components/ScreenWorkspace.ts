@@ -23,6 +23,7 @@ import {
   onRenameCompositionEnd,
   onRenameCompositionStart,
 } from './screen-workspace-ime-guard.js';
+import { CONFIG_COLORS } from '../../shared/constants.js';
 
 interface ScreenWorkspaceCallbacks {
   onTabClose: (tabId: string) => void;
@@ -33,6 +34,7 @@ interface ScreenWorkspaceCallbacks {
 }
 
 let inlineEditingGuard = false;
+const DEFAULT_GROUP_COLOR = CONFIG_COLORS[0];
 
 export function isScreenWorkspaceInlineEditing(): boolean {
   return inlineEditingGuard;
@@ -73,7 +75,7 @@ export function createGroupFromTabAction(
   setActiveScreen(screenId);
   const groupId = createGroup(
     nameOverride || tab?.configName || 'New Group',
-    tab?.configColor || '#89b4fa',
+    tab?.configColor || DEFAULT_GROUP_COLOR,
     [tabId],
     tab ? [tab.configId] : undefined,
   );
@@ -410,6 +412,74 @@ export function createScreenWorkspace(callbacks: ScreenWorkspaceCallbacks): HTML
 
     const tabsStrip = document.createElement('div');
     tabsStrip.className = 'screen-pane-tabs';
+    tabsStrip.addEventListener('click', (ev) => {
+      const target = ev.target as HTMLElement;
+      const closeButton = target.closest('.screen-pane-tab-close') as HTMLElement | null;
+      if (closeButton?.dataset.tabId) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        callbacks.onTabClose(closeButton.dataset.tabId);
+        return;
+      }
+
+      const tabMain = target.closest('.screen-pane-tab-main') as HTMLElement | null;
+      if (tabMain?.dataset.tabId) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        setActiveScreen(screenId);
+        setActiveTab(tabMain.dataset.tabId);
+        return;
+      }
+
+      const groupMain = target.closest('.screen-pane-group-main') as HTMLElement | null;
+      if (groupMain?.dataset.groupId) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        setActiveScreen(screenId);
+        toggleGroupCollapse(groupMain.dataset.groupId);
+        callbacks.onLayoutChanged();
+      }
+    });
+    tabsStrip.addEventListener('dblclick', (ev) => {
+      const target = ev.target as HTMLElement;
+      if (target.closest('.screen-pane-tab-close')) return;
+      const tabMain = target.closest('.screen-pane-tab-main') as HTMLElement | null;
+      if (!tabMain?.dataset.tabId) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      editingTabId = tabMain.dataset.tabId;
+      pendingFocusTabId = tabMain.dataset.tabId;
+      refreshInlineEditingGuard();
+      render();
+    });
+    tabsStrip.addEventListener('keydown', (ev) => {
+      const target = ev.target as HTMLElement;
+      const tabMain = target.closest('.screen-pane-tab-main') as HTMLElement | null;
+      if (!tabMain?.dataset.tabId) return;
+      if (editingTabId === tabMain.dataset.tabId) return;
+      if (ev.key !== 'Enter' && ev.key !== ' ') return;
+      ev.preventDefault();
+      setActiveScreen(screenId);
+      setActiveTab(tabMain.dataset.tabId);
+    });
+    tabsStrip.addEventListener('contextmenu', (ev) => {
+      const target = ev.target as HTMLElement;
+      const tabMain = target.closest('.screen-pane-tab-main') as HTMLElement | null;
+      if (tabMain?.dataset.tabId) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        setActiveScreen(screenId);
+        setActiveTab(tabMain.dataset.tabId);
+        showTabContextMenu(tabMain.dataset.tabId, screenId, ev.clientX, ev.clientY);
+        return;
+      }
+      const group = target.closest('.screen-pane-group') as HTMLElement | null;
+      if (group?.dataset.groupId) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        showGroupContextMenu(group.dataset.groupId, screenId, ev.clientX, ev.clientY);
+      }
+    });
     pane.appendChild(tabsStrip);
 
     const terminalHost = document.createElement('div');
@@ -451,6 +521,7 @@ export function createScreenWorkspace(callbacks: ScreenWorkspaceCallbacks): HTML
     tabsStrip: HTMLElement,
   ): void {
     tabsStrip.innerHTML = '';
+    const tabById = new Map(screen.tabs.map(tab => [tab.id, tab] as const));
     if (screen.tabs.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'screen-pane-empty';
@@ -458,60 +529,31 @@ export function createScreenWorkspace(callbacks: ScreenWorkspaceCallbacks): HTML
       tabsStrip.appendChild(empty);
     } else {
       const appendTab = (tabId: string) => {
-        const tab = screen.tabs.find(item => item.id === tabId);
+        const tab = tabById.get(tabId);
         if (!tab) return;
         const tabEl = document.createElement('div');
         const effectiveState = getTabEffectiveState(tab);
-        tabEl.setAttribute('role', 'button');
-        tabEl.tabIndex = 0;
         tabEl.className = `screen-pane-tab${screen.activeTabId === tab.id ? ' active' : ''}${effectiveState === 'waiting' ? ' waiting' : ''}`;
         tabEl.dataset.tabId = tab.id;
         const isEditing = editingTabId === tab.id;
         tabEl.innerHTML = isEditing ? `
           <span class="screen-pane-tab-dot" style="background:${tab.configColor}"></span>
           <input class="screen-pane-tab-input" type="text" value="${escapeHtmlAttr(tab.customName || tab.configName)}" />
-          <span class="screen-pane-tab-close" aria-label="Close">×</span>
+          <button type="button" class="screen-pane-tab-close" data-tab-id="${tab.id}" aria-label="Close tab">×</button>
         ` : `
-          <span class="screen-pane-tab-dot" style="background:${tab.configColor}"></span>
-          <span class="screen-pane-tab-name">${escapeHtml(tab.customName || tab.configName)}</span>
-          ${effectiveState === 'waiting' ? '<span class="screen-pane-tab-badge">W</span>' : ''}
-          <span class="screen-pane-tab-close" aria-label="Close">×</span>
+          <button
+            type="button"
+            class="screen-pane-tab-main"
+            data-tab-main="1"
+            data-tab-id="${tab.id}"
+            aria-label="Activate tab ${escapeHtmlAttr(tab.customName || tab.configName)}"
+          >
+            <span class="screen-pane-tab-dot" style="background:${tab.configColor}"></span>
+            <span class="screen-pane-tab-name">${escapeHtml(tab.customName || tab.configName)}</span>
+            ${effectiveState === 'waiting' ? '<span class="screen-pane-tab-badge">W</span>' : ''}
+          </button>
+          <button type="button" class="screen-pane-tab-close" data-tab-id="${tab.id}" aria-label="Close tab">×</button>
         `;
-
-        tabEl.addEventListener('click', (ev) => {
-          ev.stopPropagation();
-          const target = ev.target as HTMLElement;
-          if (target.closest('.screen-pane-tab-close')) {
-            callbacks.onTabClose(tab.id);
-            return;
-          }
-          setActiveScreen(screen.id);
-          setActiveTab(tab.id);
-        });
-        tabEl.addEventListener('contextmenu', (ev) => {
-          ev.preventDefault();
-          ev.stopPropagation();
-          setActiveScreen(screen.id);
-          setActiveTab(tab.id);
-          showTabContextMenu(tab.id, screen.id, ev.clientX, ev.clientY);
-        });
-        tabEl.addEventListener('dblclick', (ev) => {
-          const target = ev.target as HTMLElement;
-          if (target.closest('.screen-pane-tab-close')) return;
-          ev.preventDefault();
-          ev.stopPropagation();
-          editingTabId = tab.id;
-          pendingFocusTabId = tab.id;
-          refreshInlineEditingGuard();
-          render();
-        });
-        tabEl.addEventListener('keydown', (ev) => {
-          if (editingTabId === tab.id) return;
-          if (ev.key !== 'Enter' && ev.key !== ' ') return;
-          ev.preventDefault();
-          setActiveScreen(screen.id);
-          setActiveTab(tab.id);
-        });
         tabsStrip.appendChild(tabEl);
 
         if (isEditing) {
@@ -581,14 +623,16 @@ export function createScreenWorkspace(callbacks: ScreenWorkspaceCallbacks): HTML
       };
 
       const grouped = new Set<string>();
+      const tabById = new Map(screen.tabs.map(tab => [tab.id, tab] as const));
       for (const group of screen.groups) {
         const waitingCount = group.tabIds.reduce((acc, tabId) => {
-          const tab = screen.tabs.find(item => item.id === tabId);
+          const tab = tabById.get(tabId);
           if (!tab) return acc;
           return getTabEffectiveState(tab) === 'waiting' ? acc + 1 : acc;
         }, 0);
         const groupHeader = document.createElement('div');
         groupHeader.className = 'screen-pane-group';
+        groupHeader.dataset.groupId = group.id;
         const isEditingGroup = editingGroupId === group.id;
         const editingValue = isEditingGroup ? (editingGroupDraft ?? group.name) : group.name;
         groupHeader.innerHTML = isEditingGroup ? `
@@ -596,24 +640,20 @@ export function createScreenWorkspace(callbacks: ScreenWorkspaceCallbacks): HTML
           <input class="screen-pane-group-input" type="text" value="${escapeHtmlAttr(editingValue)}" />
           <span class="screen-pane-group-count">${group.tabIds.length}</span>
         ` : `
-          <span class="screen-pane-group-toggle" style="color:${group.color}">${group.collapsed ? '▸' : '▾'}</span>
-          <span class="screen-pane-group-name">${escapeHtml(group.name)}</span>
-          <span class="screen-pane-group-count">${group.tabIds.length}</span>
-          ${waitingCount > 0 ? `<span class="screen-pane-group-waiting">W${waitingCount}</span>` : ''}
+          <button
+            type="button"
+            class="screen-pane-group-main"
+            data-group-main="1"
+            data-group-id="${group.id}"
+            aria-label="Toggle group ${escapeHtmlAttr(group.name)}"
+            aria-expanded="${group.collapsed ? 'false' : 'true'}"
+          >
+            <span class="screen-pane-group-toggle" style="color:${group.color}">${group.collapsed ? '▸' : '▾'}</span>
+            <span class="screen-pane-group-name">${escapeHtml(group.name)}</span>
+            <span class="screen-pane-group-count">${group.tabIds.length}</span>
+            ${waitingCount > 0 ? `<span class="screen-pane-group-waiting">W${waitingCount}</span>` : ''}
+          </button>
         `;
-        groupHeader.addEventListener('click', (ev) => {
-          ev.preventDefault();
-          ev.stopPropagation();
-          if ((ev.target as HTMLElement).closest('.screen-pane-group-input')) return;
-          setActiveScreen(screen.id);
-          toggleGroupCollapse(group.id);
-          callbacks.onLayoutChanged();
-        });
-        groupHeader.addEventListener('contextmenu', (ev) => {
-          ev.preventDefault();
-          ev.stopPropagation();
-          showGroupContextMenu(group.id, screen.id, ev.clientX, ev.clientY);
-        });
         tabsStrip.appendChild(groupHeader);
         if (isEditingGroup) {
           const input = groupHeader.querySelector('.screen-pane-group-input') as HTMLInputElement | null;
@@ -776,7 +816,8 @@ export function createScreenWorkspace(callbacks: ScreenWorkspaceCallbacks): HTML
     for (const screen of visibleScreens) {
       const entry = getOrCreatePaneEntry(screen.id);
       entry.pane.className = `screen-pane${state.activeScreenId === screen.id ? ' active' : ''}`;
-      const activeTab = screen.tabs.find(tab => tab.id === screen.activeTabId) || screen.tabs[0] || null;
+      const tabById = new Map(screen.tabs.map(tab => [tab.id, tab] as const));
+      const activeTab = (screen.activeTabId ? tabById.get(screen.activeTabId) : null) || screen.tabs[0] || null;
       if (activeTab) {
         entry.terminalHost.dataset.tabId = activeTab.id;
       } else {

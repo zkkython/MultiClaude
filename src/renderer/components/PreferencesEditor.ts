@@ -22,7 +22,7 @@ export function showPreferencesEditor(
   modal.innerHTML = `
     <div class="modal-header">
       <h2>Preferences</h2>
-      <button class="btn btn-icon modal-close-btn">✕</button>
+      <button class="btn btn-icon modal-close-btn" aria-label="Close dialog">✕</button>
     </div>
     <div class="modal-body">
       <form id="preferences-form">

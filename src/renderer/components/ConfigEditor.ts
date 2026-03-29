@@ -3,6 +3,12 @@ import { CONFIG_COLORS, DEFAULTS } from '../../shared/constants.js';
 import { setupDialogA11y } from './modal-a11y.js';
 
 export type ConfigEditorResult = ModelConfigCreate | ModelConfigUpdate;
+const EYE_ICON = `
+  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+    <path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6z"></path>
+    <circle cx="12" cy="12" r="2.5"></circle>
+  </svg>
+`;
 
 export function showConfigEditor(
   existing: ModelConfig | null,
@@ -27,7 +33,7 @@ export function showConfigEditor(
   modal.innerHTML = `
     <div class="modal-header">
       <h2>${isEdit ? 'Edit Config' : 'New Config'}</h2>
-      <button class="btn btn-icon modal-close-btn">✕</button>
+      <button class="btn btn-icon modal-close-btn" aria-label="Close dialog">✕</button>
     </div>
     <div class="modal-body">
       <form id="config-form">
@@ -46,7 +52,14 @@ export function showConfigEditor(
           <label>Color</label>
           <div class="color-picker">
             ${CONFIG_COLORS.map(c => `
-              <button type="button" class="color-swatch ${c === (existing?.color || defaultColor) ? 'selected' : ''}" data-color="${c}" style="background: ${c}"></button>
+              <button
+                type="button"
+                class="color-swatch ${c === (existing?.color || defaultColor) ? 'selected' : ''}"
+                data-color="${c}"
+                style="background: ${c}"
+                aria-label="Set color ${c}"
+                aria-pressed="${c === (existing?.color || defaultColor) ? 'true' : 'false'}"
+              ></button>
             `).join('')}
             <input type="color" id="cfg-color-custom" value="${existing?.color || defaultColor}" class="color-custom" title="Custom color" />
           </div>
@@ -65,7 +78,7 @@ export function showConfigEditor(
             <label for="cfg-anthropic-token">Auth Token</label>
             <div class="input-with-toggle">
               <input type="password" id="cfg-anthropic-token" value="${escapeAttr(existing?.anthropicAuthToken || '')}" placeholder="sk-ant-..." />
-              <button type="button" class="btn btn-icon toggle-visibility" data-target="cfg-anthropic-token" title="Show/hide">👁</button>
+              <button type="button" class="btn btn-icon toggle-visibility" data-target="cfg-anthropic-token" title="Show/hide" aria-label="Show or hide token">${EYE_ICON}</button>
             </div>
           </div>
           <div class="form-group">
@@ -93,7 +106,7 @@ export function showConfigEditor(
             <label for="cfg-openai-key">API Key</label>
             <div class="input-with-toggle">
               <input type="password" id="cfg-openai-key" value="${escapeAttr(existing?.openaiApiKey || '')}" placeholder="sk-..." />
-              <button type="button" class="btn btn-icon toggle-visibility" data-target="cfg-openai-key" title="Show/hide">👁</button>
+              <button type="button" class="btn btn-icon toggle-visibility" data-target="cfg-openai-key" title="Show/hide" aria-label="Show or hide API key">${EYE_ICON}</button>
             </div>
           </div>
           <div class="form-group">
@@ -159,7 +172,7 @@ export function showConfigEditor(
               <label for="cfg-protocol-auth-token">Auth Token</label>
               <div class="input-with-toggle">
                 <input type="password" id="cfg-protocol-auth-token" value="${escapeAttr(existing?.customEnvVars?.MC_PROTOCOL_AUTH_TOKEN || '')}" placeholder="token" />
-                <button type="button" class="btn btn-icon toggle-visibility" data-target="cfg-protocol-auth-token" title="Show/hide">👁</button>
+                <button type="button" class="btn btn-icon toggle-visibility" data-target="cfg-protocol-auth-token" title="Show/hide" aria-label="Show or hide auth token">${EYE_ICON}</button>
               </div>
             </div>
             <div class="form-group">
@@ -245,8 +258,12 @@ export function showConfigEditor(
 
   modal.querySelectorAll('.color-swatch').forEach(swatch => {
     swatch.addEventListener('click', () => {
-      modal.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('selected'));
+      modal.querySelectorAll('.color-swatch').forEach(s => {
+        s.classList.remove('selected');
+        s.setAttribute('aria-pressed', 'false');
+      });
       swatch.classList.add('selected');
+      swatch.setAttribute('aria-pressed', 'true');
       selectedColor = (swatch as HTMLElement).dataset.color!;
       (modal.querySelector('#cfg-color-custom') as HTMLInputElement).value = selectedColor;
     });
@@ -255,7 +272,10 @@ export function showConfigEditor(
   const customColorInput = modal.querySelector('#cfg-color-custom') as HTMLInputElement;
   customColorInput.addEventListener('input', () => {
     selectedColor = customColorInput.value;
-    modal.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('selected'));
+    modal.querySelectorAll('.color-swatch').forEach(s => {
+      s.classList.remove('selected');
+      s.setAttribute('aria-pressed', 'false');
+    });
   });
 
   modal.querySelectorAll('.toggle-visibility').forEach((btn) => {

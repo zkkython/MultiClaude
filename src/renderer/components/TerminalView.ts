@@ -17,6 +17,36 @@ const instances = new Map<string, TerminalInstance>();
 let menuShortcutsIgnored = false;
 const FORCE_LINE_NAV_STEPS = 256;
 
+function cssVar(name: string, fallback: string): string {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
+function resolveTerminalTheme() {
+  return {
+    background: cssVar('--bg-base', '#0f1115'),
+    foreground: cssVar('--text', '#e6eaf2'),
+    cursor: cssVar('--amber-strong', '#dbb367'),
+    selectionBackground: cssVar('--terminal-selection-bg', 'rgba(201, 154, 61, 0.28)'),
+    black: cssVar('--bg-surface1', '#263043'),
+    red: cssVar('--red', '#cc5a5a'),
+    green: cssVar('--green', '#4fae74'),
+    yellow: cssVar('--yellow', '#d2a24c'),
+    blue: cssVar('--blue', '#6f9ed8'),
+    magenta: cssVar('--mauve', '#8b83b4'),
+    cyan: cssVar('--teal', '#4fa59a'),
+    white: cssVar('--text-dim', '#9aa4b5'),
+    brightBlack: cssVar('--text-muted', '#7a89a1'),
+    brightRed: cssVar('--red', '#cc5a5a'),
+    brightGreen: cssVar('--green', '#4fae74'),
+    brightYellow: cssVar('--yellow', '#d2a24c'),
+    brightBlue: cssVar('--blue', '#6f9ed8'),
+    brightMagenta: cssVar('--mauve', '#8b83b4'),
+    brightCyan: cssVar('--teal', '#4fa59a'),
+    brightWhite: cssVar('--text', '#e6eaf2'),
+  };
+}
+
 function isWebglOptInEnabled(): boolean {
   return getState().useWebglRenderer;
 }
@@ -76,28 +106,7 @@ export function createTerminalView(
     fontSize: state.fontSize,
     fontFamily: '"SF Mono", Menlo, Monaco, "Cascadia Mono", "JetBrains Mono", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans Mono CJK SC", "Courier New", monospace',
     customGlyphs: false,
-    theme: {
-      background: '#1e1e2e',
-      foreground: '#cdd6f4',
-      cursor: '#f5e0dc',
-      selectionBackground: '#585b7066',
-      black: '#45475a',
-      red: '#f38ba8',
-      green: '#a6e3a1',
-      yellow: '#f9e2af',
-      blue: '#89b4fa',
-      magenta: '#f5c2e7',
-      cyan: '#94e2d5',
-      white: '#bac2de',
-      brightBlack: '#585b70',
-      brightRed: '#f38ba8',
-      brightGreen: '#a6e3a1',
-      brightYellow: '#f9e2af',
-      brightBlue: '#89b4fa',
-      brightMagenta: '#f5c2e7',
-      brightCyan: '#94e2d5',
-      brightWhite: '#a6adc8',
-    },
+    theme: resolveTerminalTheme(),
   });
 
   const fitAddon = new FitAddon();
