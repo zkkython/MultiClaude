@@ -18,7 +18,6 @@ export function showPreferencesEditor(
 
   const modal = document.createElement('div');
   modal.className = 'modal preferences-editor';
-
   modal.innerHTML = buildPreferencesEditorMarkup(settings);
 
   overlay.appendChild(modal);

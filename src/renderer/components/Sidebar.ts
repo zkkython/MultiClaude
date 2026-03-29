@@ -105,15 +105,20 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
   let preflightRefreshSeq = 0;
   let showMoreCoachmark = readMoreCoachmarkFlag();
   const preflightByConfigId = new Map<string, { level: 'ok' | 'warning' | 'blocker'; title: string }>();
+  let lastMarkup = '';
 
   function render() {
     const state = getState();
     if (!state.sidebarVisible) {
-      content.innerHTML = `
+      const collapsedMarkup = `
         <div class="sidebar-collapsed-rail">
           <button class="btn btn-icon sidebar-toggle-btn" title="Expand Configs" aria-label="Expand Configs">${PANEL_LEFT_OPEN_ICON}</button>
         </div>
       `;
+      if (collapsedMarkup !== lastMarkup) {
+        content.innerHTML = collapsedMarkup;
+        lastMarkup = collapsedMarkup;
+      }
       return;
     }
     const configs = state.configs;
@@ -122,7 +127,7 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
       ? configs.filter(c => c.name.toLowerCase().includes(state.searchQuery.toLowerCase()))
       : configs;
 
-    content.innerHTML = `
+    const nextMarkup = `
       <div class="sidebar-header">
         <div class="sidebar-header-title">
           <h2>Configs</h2>
@@ -143,6 +148,10 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
         ` : filteredConfigs.map(config => renderConfigItem(config, state.selectedConfigId, preflightByConfigId.get(config.id), showMoreCoachmark)).join('')}
       </div>
     `;
+    if (nextMarkup !== lastMarkup) {
+      content.innerHTML = nextMarkup;
+      lastMarkup = nextMarkup;
+    }
   }
 
   // Drag resize logic
@@ -192,26 +201,17 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
     if (!target) return;
     if (target.classList.contains('sidebar-search-input') && e.key === 'Escape') {
       setState({ searchQuery: '' });
-      return;
+      (target as HTMLInputElement).blur();
     }
-
-    const configItem = target.closest('.config-item') as HTMLElement | null;
-    if (!configItem) return;
-    if (target.closest('[data-action]') || target.closest('[data-more-root]')) return;
-    if (e.key !== 'Enter' && e.key !== ' ') return;
-    e.preventDefault();
-    const configId = configItem.dataset.configId;
-    if (!configId) return;
-    onAction({ type: 'select-config', configId });
   });
 
   content.addEventListener('dblclick', (e) => {
     const target = e.target as HTMLElement | null;
     if (!target) return;
     if (target.closest('[data-action]') || target.closest('[data-more-root]')) return;
-    const configItem = target.closest('.config-item') as HTMLElement | null;
-    if (!configItem?.dataset.configId) return;
-    onAction({ type: 'new-terminal', configId: configItem.dataset.configId });
+    const selectButton = target.closest('[data-select-config]') as HTMLElement | null;
+    if (!selectButton?.dataset.configId) return;
+    onAction({ type: 'new-terminal', configId: selectButton.dataset.configId });
   });
 
   content.addEventListener('click', (e) => {
@@ -276,9 +276,9 @@ export function createSidebar(onAction: (action: SidebarAction) => void): HTMLEl
       return;
     }
 
-    const configItem = target.closest('.config-item') as HTMLElement | null;
-    if (!configItem?.dataset.configId) return;
-    onAction({ type: 'select-config', configId: configItem.dataset.configId });
+    const selectButton = target.closest('[data-select-config]') as HTMLElement | null;
+    if (!selectButton?.dataset.configId) return;
+    onAction({ type: 'select-config', configId: selectButton.dataset.configId });
   });
 
   const closeMoreMenusByEvent = (e: Event) => {
@@ -422,18 +422,23 @@ function renderConfigItem(
     <div
       class="config-item ${isSelected ? 'selected' : ''}"
       data-config-id="${config.id}"
-      role="button"
-      tabindex="0"
-      aria-label="Select config ${escapeHtml(config.name)}"
-      aria-pressed="${isSelected ? 'true' : 'false'}"
     >
-      <div class="config-item-header">
-        <span class="config-color-dot" style="background: ${config.color}"></span>
-        <span class="config-name">${escapeHtml(config.name)}</span>
-        <span class="preflight-pill ${preflightClass}" title="${escapeHtml(preflightTitle)}">${preflightLabel}</span>
-        <span class="provider-pill ${providerClass}">${providerLabel}</span>
-      </div>
-      <div class="config-item-detail">${escapeHtml(modelSummary)}</div>
+      <button
+        type="button"
+        class="config-item-main"
+        data-select-config="1"
+        data-config-id="${config.id}"
+        aria-label="Select config ${escapeHtml(config.name)}"
+        aria-pressed="${isSelected ? 'true' : 'false'}"
+      >
+        <div class="config-item-header">
+          <span class="config-color-dot" style="background: ${config.color}"></span>
+          <span class="config-name">${escapeHtml(config.name)}</span>
+          <span class="preflight-pill ${preflightClass}" title="${escapeHtml(preflightTitle)}">${preflightLabel}</span>
+          <span class="provider-pill ${providerClass}">${providerLabel}</span>
+        </div>
+        <div class="config-item-detail">${escapeHtml(modelSummary)}</div>
+      </button>
       <div class="config-item-actions">
         ${buildConfigActionsMarkup(config.id)}
       </div>
