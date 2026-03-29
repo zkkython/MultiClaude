@@ -121,6 +121,7 @@ Data is stored in Electron `app.getPath('userData')` (platform specific), includ
 ```bash
 pnpm run build
 pnpm run test
+pnpm run test:coverage
 pnpm run start
 ```
 

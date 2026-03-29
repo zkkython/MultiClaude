@@ -4,16 +4,41 @@ import type { SystemTerminalOpenOptions } from '../shared/types.js';
 import { buildEnvForConfig } from './env-builder.js';
 import { ensureCodexApiKeyLogin } from './codex-auth.js';
 
+interface SystemTerminalDeps {
+  buildEnvForConfig: typeof buildEnvForConfig;
+  ensureCodexApiKeyLogin: typeof ensureCodexApiKeyLogin;
+  spawn: typeof spawn;
+  getPlatform: () => NodeJS.Platform;
+}
+
+const defaultDeps: SystemTerminalDeps = {
+  buildEnvForConfig,
+  ensureCodexApiKeyLogin,
+  spawn,
+  getPlatform: () => process.platform,
+};
+
+let deps: SystemTerminalDeps = defaultDeps;
+
+export function __setSystemTerminalDepsForTest(overrides: Partial<SystemTerminalDeps> | null): void {
+  if (!overrides) {
+    deps = defaultDeps;
+    return;
+  }
+  deps = { ...defaultDeps, ...overrides };
+}
+
 export async function openSystemTerminal(
   config: ModelConfig,
   options?: SystemTerminalOpenOptions,
 ): Promise<void> {
-  const env = buildEnvForConfig(config);
-  await ensureCodexApiKeyLogin(config, env);
+  const env = deps.buildEnvForConfig(config);
+  await deps.ensureCodexApiKeyLogin(config, env);
 
-  if (process.platform === 'darwin') {
+  const platform = deps.getPlatform();
+  if (platform === 'darwin') {
     await openMacTerminal(config, env, options);
-  } else if (process.platform === 'win32') {
+  } else if (platform === 'win32') {
     await openWindowsTerminal(config, env, options);
   } else {
     await openLinuxTerminal(config, env, options);
@@ -102,7 +127,7 @@ async function spawnDetached(
   options?: SystemTerminalOpenOptions,
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = deps.spawn(command, args, {
       env,
       cwd: options?.cwd?.trim() || undefined,
       detached: true,

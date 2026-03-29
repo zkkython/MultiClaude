@@ -9,6 +9,13 @@ interface ExecResult {
   timedOut: boolean;
 }
 
+type RunCodexFn = (
+  args: string[],
+  env: Record<string, string>,
+  input?: string,
+  timeoutMs?: number,
+) => Promise<ExecResult>;
+
 function runCodex(
   args: string[],
   env: Record<string, string>,
@@ -53,6 +60,12 @@ function runCodex(
   });
 }
 
+let runCodexImpl: RunCodexFn = runCodex;
+
+export function __setRunCodexForTest(fn: RunCodexFn | null): void {
+  runCodexImpl = fn || runCodex;
+}
+
 export async function ensureCodexApiKeyLogin(config: ModelConfig, env: Record<string, string>): Promise<void> {
   if (config.provider !== 'codex') return;
   const providerName = (config.codexModelProvider || 'openai').trim().toLowerCase();
@@ -62,7 +75,7 @@ export async function ensureCodexApiKeyLogin(config: ModelConfig, env: Record<st
   const apiKey = (env[keyEnv] || env['OPENAI_API_KEY'] || '').trim();
   if (!apiKey) return;
 
-  const statusResult = await runCodex(['login', 'status'], env, undefined, 5000);
+  const statusResult = await runCodexImpl(['login', 'status'], env, undefined, 5000);
   if (statusResult.notFound) {
     return;
   }
@@ -70,7 +83,7 @@ export async function ensureCodexApiKeyLogin(config: ModelConfig, env: Record<st
     return;
   }
 
-  const loginResult = await runCodex(['login', '--with-api-key'], env, `${apiKey}\n`, 10000);
+  const loginResult = await runCodexImpl(['login', '--with-api-key'], env, `${apiKey}\n`, 10000);
   if (loginResult.notFound) {
     return;
   }

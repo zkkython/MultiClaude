@@ -8,18 +8,41 @@ export interface RunnerSidechannelGatewayDeps {
   ingestEvent: (terminalId: string, event: unknown) => void;
 }
 
+interface SidechannelServer {
+  once: (event: 'error', listener: (err: Error) => void) => void;
+  listen: (port: number, host: string, callback: () => void) => void;
+  address: () => ReturnType<http.Server['address']>;
+  close: (callback: () => void) => void;
+}
+
+interface RunnerSidechannelGatewayInternalDeps {
+  createServer: (handler: http.RequestListener) => SidechannelServer;
+  createToken: () => string;
+}
+
+const defaultInternalDeps: RunnerSidechannelGatewayInternalDeps = {
+  createServer: (handler) => http.createServer(handler),
+  createToken: () => randomBytes(24).toString('hex'),
+};
+
 export class RunnerSidechannelGateway {
   private tokenByTerminal = new Map<string, string>();
-  private server: http.Server | null = null;
+  private server: SidechannelServer | null = null;
   private port: number | null = null;
   private starting: Promise<void> | null = null;
+  private internalDeps: RunnerSidechannelGatewayInternalDeps;
 
-  constructor(private deps: RunnerSidechannelGatewayDeps) {}
+  constructor(
+    private deps: RunnerSidechannelGatewayDeps,
+    internalDeps?: Partial<RunnerSidechannelGatewayInternalDeps>
+  ) {
+    this.internalDeps = { ...defaultInternalDeps, ...(internalDeps || {}) };
+  }
 
   async injectEnv(terminalId: string, env: Record<string, string>): Promise<void> {
     await this.ensureServer();
     if (!this.port) return;
-    const token = randomBytes(24).toString('hex');
+    const token = this.internalDeps.createToken();
     this.tokenByTerminal.set(terminalId, token);
     env.MC_RUNNER_EVENT_URL = `http://127.0.0.1:${this.port}${SIDECAR_EVENT_PATH}`;
     env.MC_RUNNER_EVENT_TOKEN = token;
@@ -47,7 +70,7 @@ export class RunnerSidechannelGateway {
     if (this.starting) return this.starting;
 
     this.starting = new Promise<void>((resolve, reject) => {
-      const server = http.createServer((req, res) => {
+      const server = this.internalDeps.createServer((req, res) => {
         void this.handleRequest(req, res);
       });
       server.once('error', (err) => {

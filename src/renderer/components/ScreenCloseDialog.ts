@@ -15,22 +15,7 @@ export function showScreenCloseDialog(input: {
 
   const modal = document.createElement('div');
   modal.className = 'modal screen-close-dialog';
-  modal.innerHTML = `
-    <div class="modal-header">
-      <h2>Close Screen</h2>
-      <button class="btn btn-icon modal-close-btn" aria-label="Close dialog">✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="screen-close-meta">Screen: <code>${escapeHtml(input.screenId)}</code> · ${escapeHtml(input.screenName)}</div>
-      <div class="screen-close-desc">Tabs in this screen: ${input.tabCount}</div>
-      <div class="screen-close-hint">Choose whether to close only for this session, or also clear persisted screen settings.</div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" id="screen-close-cancel">Cancel</button>
-      <button class="btn btn-primary" id="screen-close-session">Close (Session Only)</button>
-      <button class="btn btn-danger" id="screen-close-clear">Close + Clear Saved Data</button>
-    </div>
-  `;
+  modal.innerHTML = buildScreenCloseDialogMarkup(input);
 
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
@@ -56,6 +41,29 @@ export function showScreenCloseDialog(input: {
       overlay.remove();
     }
   });
+}
+
+export function buildScreenCloseDialogMarkup(input: {
+  screenId: string;
+  screenName: string;
+  tabCount: number;
+}): string {
+  return `
+    <div class="modal-header">
+      <h2>Close Screen</h2>
+      <button class="btn btn-icon modal-close-btn" aria-label="Close dialog">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="screen-close-meta">Screen: <code>${escapeHtml(input.screenId)}</code> · ${escapeHtml(input.screenName)}</div>
+      <div class="screen-close-desc">Tabs in this screen: ${input.tabCount}</div>
+      <div class="screen-close-hint">Choose whether to close only for this session, or also clear persisted screen settings.</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="screen-close-cancel">Cancel</button>
+      <button class="btn btn-primary" id="screen-close-session">Close (Session Only)</button>
+      <button class="btn btn-danger" id="screen-close-clear">Close + Clear Saved Data</button>
+    </div>
+  `;
 }
 
 function escapeHtml(text: string): string {
