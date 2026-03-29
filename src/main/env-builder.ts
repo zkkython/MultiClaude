@@ -2,7 +2,73 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import type { ModelConfig } from '../shared/types.js';
-import { getCodexHomePath, getEnvFilePath, getEnvFilesDir, getZdotdirPath } from './config-paths.js';
+
+interface EnvBuilderPathDeps {
+  getCodexHomePath: (config: Pick<ModelConfig, 'id' | 'codexHomeName'>) => string;
+  getEnvFilePath: (configId: string) => string;
+  getEnvFilesDir: () => string;
+  getZdotdirPath: (configId: string) => string;
+}
+
+interface EnvBuilderFsDeps {
+  existsSync: typeof fs.existsSync;
+  mkdirSync: typeof fs.mkdirSync;
+  writeFileSync: typeof fs.writeFileSync;
+}
+
+interface EnvBuilderDeps {
+  paths: EnvBuilderPathDeps;
+  fs: EnvBuilderFsDeps;
+  homedir: () => string;
+}
+
+const defaultDeps: EnvBuilderDeps = {
+  paths: null as unknown as EnvBuilderPathDeps,
+  fs: {
+    existsSync: fs.existsSync,
+    mkdirSync: fs.mkdirSync,
+    writeFileSync: fs.writeFileSync,
+  },
+  homedir: () => os.homedir(),
+};
+
+let envBuilderDeps: EnvBuilderDeps | null = null;
+
+function resolveDefaultPathDeps(): EnvBuilderPathDeps {
+  const configPaths = require('./config-paths.js') as typeof import('./config-paths.js');
+  return {
+    getCodexHomePath: configPaths.getCodexHomePath,
+    getEnvFilePath: configPaths.getEnvFilePath,
+    getEnvFilesDir: configPaths.getEnvFilesDir,
+    getZdotdirPath: configPaths.getZdotdirPath,
+  };
+}
+
+function getEnvBuilderDeps(): EnvBuilderDeps {
+  if (envBuilderDeps) return envBuilderDeps;
+  envBuilderDeps = {
+    ...defaultDeps,
+    paths: resolveDefaultPathDeps(),
+  };
+  return envBuilderDeps;
+}
+
+export function __setEnvBuilderDepsForTest(deps: Partial<EnvBuilderDeps> | null): void {
+  if (!deps) {
+    envBuilderDeps = null;
+    return;
+  }
+  const current = envBuilderDeps || {
+    ...defaultDeps,
+    paths: deps.paths || resolveDefaultPathDeps(),
+  };
+  envBuilderDeps = {
+    ...current,
+    ...deps,
+    paths: { ...current.paths, ...(deps.paths || {}) },
+    fs: { ...current.fs, ...(deps.fs || {}) },
+  };
+}
 
 function isValidEnvVarName(name: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
@@ -49,6 +115,7 @@ function buildClaudeEnv(config: ModelConfig): Record<string, string> {
 }
 
 function buildCodexEnv(config: ModelConfig): Record<string, string> {
+  const deps = getEnvBuilderDeps();
   const env: Record<string, string> = {};
   const providerName = normalizeCodexProviderName(config.codexModelProvider);
   const apiKeyEnvKey = normalizeEnvVarName(config.codexApiKeyEnvKey || 'OPENAI_API_KEY');
@@ -64,9 +131,9 @@ function buildCodexEnv(config: ModelConfig): Record<string, string> {
   if (config.openaiModel) env['OPENAI_MODEL'] = config.openaiModel;
   if (config.apiTimeoutMs) env['API_TIMEOUT_MS'] = String(config.apiTimeoutMs);
 
-  const codexHomePath = getCodexHomePath(config);
-  if (!fs.existsSync(codexHomePath)) {
-    fs.mkdirSync(codexHomePath, { recursive: true });
+  const codexHomePath = deps.paths.getCodexHomePath(config);
+  if (!deps.fs.existsSync(codexHomePath)) {
+    deps.fs.mkdirSync(codexHomePath, { recursive: true });
   }
   env['CODEX_HOME'] = codexHomePath;
   writeCodexConfigToml(config, codexHomePath, providerName, apiKeyEnvKey, wireApi);
@@ -89,26 +156,32 @@ function mergeWithProviderPriority(
 }
 
 function writeEnvFile(config: ModelConfig, configEnv: Record<string, string>): string {
-  const envFileDir = getEnvFilesDir();
-  if (!fs.existsSync(envFileDir)) {
-    fs.mkdirSync(envFileDir, { recursive: true });
+  const deps = getEnvBuilderDeps();
+  const envFileDir = deps.paths.getEnvFilesDir();
+  if (!deps.fs.existsSync(envFileDir)) {
+    deps.fs.mkdirSync(envFileDir, { recursive: true });
   }
 
-  const envFilePath = getEnvFilePath(config.id);
+  const envFilePath = deps.paths.getEnvFilePath(config.id);
   const exportLines = Object.entries(configEnv)
     .map(([k, v]) => `export ${k}=${escapeShellValue(v)}`)
     .join('\n');
-  fs.writeFileSync(envFilePath, `#!/bin/sh\n# MultiClaude env for: ${config.name}\n${exportLines}\n`, { mode: 0o600 });
+  deps.fs.writeFileSync(
+    envFilePath,
+    `#!/bin/sh\n# MultiClaude env for: ${config.name}\n${exportLines}\n`,
+    { mode: 0o600 }
+  );
   return envFilePath;
 }
 
 function writeZdotdirWrapper(config: ModelConfig, configEnv: Record<string, string>): string {
-  const zdotdir = getZdotdirPath(config.id);
-  if (!fs.existsSync(zdotdir)) {
-    fs.mkdirSync(zdotdir, { recursive: true });
+  const deps = getEnvBuilderDeps();
+  const zdotdir = deps.paths.getZdotdirPath(config.id);
+  if (!deps.fs.existsSync(zdotdir)) {
+    deps.fs.mkdirSync(zdotdir, { recursive: true });
   }
 
-  const realZdotdir = process.env.ZDOTDIR || os.homedir();
+  const realZdotdir = process.env.ZDOTDIR || deps.homedir();
   const exportLines = Object.entries(configEnv)
     .map(([k, v]) => `export ${k}=${escapeShellValue(v)}`)
     .join('\n');
@@ -163,7 +236,7 @@ if [[ -o interactive ]]; then
   fi
 fi
 `;
-  fs.writeFileSync(path.join(zdotdir, '.zshrc'), wrapperRc, { mode: 0o600 });
+  deps.fs.writeFileSync(path.join(zdotdir, '.zshrc'), wrapperRc, { mode: 0o600 });
 
   const wrapperProfile = `# MultiClaude wrapper .zprofile
 export ZDOTDIR=${escapeShellValue(realZdotdir)}
@@ -172,7 +245,7 @@ if [[ -f ${escapeShellValue(realZdotdir)}/.zprofile ]]; then
 fi
 ${exportLines}
 `;
-  fs.writeFileSync(path.join(zdotdir, '.zprofile'), wrapperProfile, { mode: 0o600 });
+  deps.fs.writeFileSync(path.join(zdotdir, '.zprofile'), wrapperProfile, { mode: 0o600 });
 
   return zdotdir;
 }
@@ -188,6 +261,7 @@ function writeCodexConfigToml(
   apiKeyEnvKey: string,
   wireApi: 'responses' | 'chat_completions'
 ): void {
+  const deps = getEnvBuilderDeps();
   const configPath = path.join(codexHomePath, 'config.toml');
   const lines: string[] = [];
 
@@ -212,7 +286,7 @@ function writeCodexConfigToml(
   lines.push(`env_key = ${toTomlString(apiKeyEnvKey)}`);
   lines.push('');
 
-  fs.writeFileSync(configPath, `${lines.join('\n')}\n`, { mode: 0o600 });
+  deps.fs.writeFileSync(configPath, `${lines.join('\n')}\n`, { mode: 0o600 });
 }
 
 function toTomlString(value: string): string {

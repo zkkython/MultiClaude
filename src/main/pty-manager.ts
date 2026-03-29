@@ -14,19 +14,43 @@ interface PtyProcess {
 // node-pty must be required at runtime (native module)
 let nodePty: any;
 
+interface PtyManagerDeps {
+  platform: () => NodeJS.Platform;
+  env: () => NodeJS.ProcessEnv;
+  homedir: () => string;
+  existsSync: (targetPath: string) => boolean;
+  statSync: (targetPath: string) => { mode: number };
+  chmodSync: (targetPath: string, mode: number) => void;
+  requireResolve: (id: string) => string;
+  runtimeRequire: (id: string) => any;
+}
+
+const defaultDeps: PtyManagerDeps = {
+  platform: () => process.platform,
+  env: () => process.env,
+  homedir: () => os.homedir(),
+  existsSync: (targetPath) => fs.existsSync(targetPath),
+  statSync: (targetPath) => fs.statSync(targetPath),
+  chmodSync: (targetPath, mode) => fs.chmodSync(targetPath, mode),
+  requireResolve: (id) => require.resolve(id),
+  runtimeRequire: (id) => require(id),
+};
+
+let deps: PtyManagerDeps = defaultDeps;
+
 function getPty() {
   if (!nodePty) {
     ensureNodePtySpawnHelperExecutable();
-    nodePty = require('node-pty');
+    nodePty = deps.runtimeRequire('node-pty');
   }
   return nodePty;
 }
 
 function ensureNodePtySpawnHelperExecutable(): void {
-  if (process.platform === 'win32') return;
+  if (deps.platform() === 'win32') return;
   let packageRoot = '';
   try {
-    const pkgJson = require.resolve('node-pty/package.json');
+    const pkgJson = deps.requireResolve('node-pty/package.json');
     packageRoot = path.dirname(pkgJson);
   } catch {
     return;
@@ -34,17 +58,17 @@ function ensureNodePtySpawnHelperExecutable(): void {
   if (!packageRoot) return;
 
   const candidates: string[] = [];
-  if (process.platform === 'darwin') {
+  if (deps.platform() === 'darwin') {
     candidates.push(path.join(packageRoot, 'prebuilds', `darwin-${process.arch}`, 'spawn-helper'));
   }
   candidates.push(path.join(packageRoot, 'build', 'Release', 'spawn-helper'));
 
   for (const helperPath of candidates) {
     try {
-      const stat = fs.statSync(helperPath);
+      const stat = deps.statSync(helperPath);
       const mode = stat.mode & 0o777;
       if ((mode & 0o111) === 0) {
-        fs.chmodSync(helperPath, 0o755);
+        deps.chmodSync(helperPath, 0o755);
       }
     } catch {
       // Best effort only.
@@ -55,14 +79,14 @@ function ensureNodePtySpawnHelperExecutable(): void {
 const ptys = new Map<string, PtyProcess>();
 
 function getDefaultShell(): string {
-  if (process.platform === 'win32') {
-    return process.env.COMSPEC || 'cmd.exe';
+  if (deps.platform() === 'win32') {
+    return deps.env().COMSPEC || 'cmd.exe';
   }
-  return process.env.SHELL || '/bin/zsh';
+  return deps.env().SHELL || '/bin/zsh';
 }
 
 function getShellCandidates(): string[] {
-  if (process.platform === 'win32') {
+  if (deps.platform() === 'win32') {
     return [getDefaultShell(), 'cmd.exe', 'powershell.exe'];
   }
   const candidates = [
@@ -76,7 +100,7 @@ function getShellCandidates(): string[] {
     if (!item) continue;
     if (unique.includes(item)) continue;
     if (item.startsWith('/')) {
-      if (!fs.existsSync(item)) continue;
+      if (!deps.existsSync(item)) continue;
     }
     unique.push(item);
   }
@@ -84,7 +108,7 @@ function getShellCandidates(): string[] {
 }
 
 function getShellArgs(shell: string): string[] {
-  if (process.platform === 'win32') {
+  if (deps.platform() === 'win32') {
     return [];
   }
   const base = shell.split('/').pop() || shell;
@@ -103,7 +127,7 @@ export function spawnPty(
 ): void {
   const pty = getPty();
   const sanitizedEnv = sanitizeEnv(env);
-  const home = os.homedir();
+  const home = deps.homedir();
   const cwd = options?.cwd && options.cwd.trim() ? options.cwd : home;
   const shells = getShellCandidates();
   if (shells.length === 0) {
@@ -187,4 +211,9 @@ export function killAllPtys(): void {
     }
   }
   ptys.clear();
+}
+
+export function __setPtyManagerDepsForTest(overrides: Partial<PtyManagerDeps> | null): void {
+  deps = overrides ? { ...defaultDeps, ...overrides } : defaultDeps;
+  nodePty = null;
 }

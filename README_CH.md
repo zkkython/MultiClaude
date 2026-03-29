@@ -126,6 +126,7 @@ pnpm run dev
 ```bash
 pnpm run build
 pnpm run test
+pnpm run test:coverage
 pnpm run start
 ```
 

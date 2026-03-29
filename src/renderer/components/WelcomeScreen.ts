@@ -1,7 +1,12 @@
 export function createWelcomeScreen(): HTMLElement {
   const container = document.createElement('div');
   container.className = 'welcome-screen';
-  container.innerHTML = `
+  container.innerHTML = buildWelcomeScreenMarkup();
+  return container;
+}
+
+export function buildWelcomeScreenMarkup(): string {
+  return `
     <div class="welcome-content">
       <div class="welcome-icon">⚡</div>
       <h1>MultiClaude</h1>
@@ -10,5 +15,4 @@ export function createWelcomeScreen(): HTMLElement {
       <button class="btn btn-primary welcome-btn" id="welcome-create-btn">Create Your First Config</button>
     </div>
   `;
-  return container;
 }

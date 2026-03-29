@@ -1,98 +1,131 @@
-import { contextBridge, ipcRenderer } from 'electron';
 import { IPC } from '../shared/constants.js';
 import type { MultiClaudeAPI } from '../shared/types.js';
 
-const api: MultiClaudeAPI = {
-  config: {
-    getAll: () => ipcRenderer.invoke(IPC.CONFIG_GET_ALL),
-    create: (data) => ipcRenderer.invoke(IPC.CONFIG_CREATE, data),
-    update: (data) => ipcRenderer.invoke(IPC.CONFIG_UPDATE, data),
-    delete: (id) => ipcRenderer.invoke(IPC.CONFIG_DELETE, id),
-    duplicate: (id) => ipcRenderer.invoke(IPC.CONFIG_DUPLICATE, id),
-    export: () => ipcRenderer.invoke(IPC.CONFIG_EXPORT),
-    import: () => ipcRenderer.invoke(IPC.CONFIG_IMPORT),
-    onChanged: (callback) => {
-      const handler = () => callback();
-      ipcRenderer.on(IPC.CONFIG_CHANGED, handler);
-      return () => ipcRenderer.removeListener(IPC.CONFIG_CHANGED, handler);
-    },
-  },
-  terminal: {
-    spawn: (configId, options) => ipcRenderer.invoke(IPC.TERMINAL_SPAWN, configId, options),
-    write: (terminalId, data) => ipcRenderer.send(IPC.TERMINAL_WRITE, terminalId, data),
-    resize: (terminalId, cols, rows) => ipcRenderer.send(IPC.TERMINAL_RESIZE, terminalId, cols, rows),
-    kill: (terminalId) => ipcRenderer.send(IPC.TERMINAL_KILL, terminalId),
-    onData: (callback) => {
-      const handler = (_event: any, terminalId: string, data: string) => callback(terminalId, data);
-      ipcRenderer.on(IPC.TERMINAL_DATA, handler);
-      return () => ipcRenderer.removeListener(IPC.TERMINAL_DATA, handler);
-    },
-    onExit: (callback) => {
-      const handler = (_event: any, terminalId: string, code: number) => callback(terminalId, code);
-      ipcRenderer.on(IPC.TERMINAL_EXIT, handler);
-      return () => ipcRenderer.removeListener(IPC.TERMINAL_EXIT, handler);
-    },
-    onState: (callback) => {
-      const handler = (_event: any, terminalId: string, state: any) => callback(terminalId, state);
-      ipcRenderer.on(IPC.TERMINAL_STATE, handler);
-      return () => ipcRenderer.removeListener(IPC.TERMINAL_STATE, handler);
-    },
-    getStateSnapshot: () => ipcRenderer.invoke(IPC.TERMINAL_STATE_SNAPSHOT_GET),
-  },
-  systemTerminal: {
-    open: (configId, options) => ipcRenderer.invoke(IPC.SYSTEM_TERMINAL_OPEN, configId, options),
-  },
-  contextMenu: {
-    show: (terminalId, hasSelection) => ipcRenderer.send(IPC.CONTEXT_MENU_SHOW, terminalId, hasSelection),
-  },
-  menu: {
-    onAction: (callback) => {
-      const handler = (_event: any, action: string, payload?: any) => callback(action, payload);
-      ipcRenderer.on(IPC.MENU_ACTION, handler);
-      return () => ipcRenderer.removeListener(IPC.MENU_ACTION, handler);
-    },
-  },
-  app: {
-    onNotification: (callback) => {
-      const handler = (_event: any, title: string, body: string, terminalId?: string) => callback(title, body, terminalId);
-      ipcRenderer.on(IPC.APP_NOTIFICATION, handler);
-      return () => ipcRenderer.removeListener(IPC.APP_NOTIFICATION, handler);
-    },
-    getSettings: () => ipcRenderer.invoke(IPC.APP_GET_SETTINGS),
-    saveSettings: (settings) => ipcRenderer.invoke(IPC.APP_SAVE_SETTINGS, settings),
-    selectDirectory: (defaultPath) => ipcRenderer.invoke(IPC.APP_SELECT_DIRECTORY, defaultPath),
-    ensureDirectory: (path) => ipcRenderer.invoke(IPC.APP_ENSURE_DIRECTORY, path),
-    writeTextFile: (path, content) => ipcRenderer.invoke(IPC.APP_WRITE_TEXT_FILE, path, content),
-    setIgnoreMenuShortcuts: (ignore) => ipcRenderer.invoke(IPC.APP_SET_IGNORE_MENU_SHORTCUTS, ignore),
-  },
-  worktree: {
-    list: (repoPath) => ipcRenderer.invoke(IPC.WORKTREE_LIST, repoPath),
-    create: (input) => ipcRenderer.invoke(IPC.WORKTREE_CREATE, input),
-    remove: (input) => ipcRenderer.invoke(IPC.WORKTREE_REMOVE, input),
-    prune: (repoPath) => ipcRenderer.invoke(IPC.WORKTREE_PRUNE, repoPath),
-    status: (worktreePath) => ipcRenderer.invoke(IPC.WORKTREE_STATUS, worktreePath),
-    mergeReadiness: (worktreePath, targetRef) => ipcRenderer.invoke(IPC.WORKTREE_MERGE_READINESS, worktreePath, targetRef),
-    buildMergeTemplate: (input) => ipcRenderer.invoke(IPC.WORKTREE_MERGE_TEMPLATE, input),
-  },
-  protocol: {
-    startSession: (configId, terminalId) => ipcRenderer.invoke(IPC.RUNNER_SESSION_START, configId, terminalId),
-    ingestRawEvent: (sessionId, rawEvent) => ipcRenderer.invoke(IPC.RUNNER_EVENT_INGEST, sessionId, rawEvent),
-    resolveInput: (sessionId, requestId) => ipcRenderer.invoke(IPC.RUNNER_INPUT_RESOLVE, sessionId, requestId),
-    submitInput: (input) => ipcRenderer.invoke(IPC.RUNNER_INPUT_SUBMIT, input),
-    interruptSession: (sessionId) => ipcRenderer.invoke(IPC.RUNNER_SESSION_INTERRUPT, sessionId),
-    stopSession: (sessionId) => ipcRenderer.invoke(IPC.RUNNER_SESSION_STOP, sessionId),
-    endSession: (sessionId) => ipcRenderer.invoke(IPC.RUNNER_SESSION_END, sessionId),
-    onEvent: (callback) => {
-      const handler = (_event: any, runnerEvent: any) => callback(runnerEvent);
-      ipcRenderer.on(IPC.RUNNER_EVENT, handler);
-      return () => ipcRenderer.removeListener(IPC.RUNNER_EVENT, handler);
-    },
-    getMetrics: () => ipcRenderer.invoke(IPC.RUNNER_METRICS_GET),
-    resetMetrics: () => ipcRenderer.invoke(IPC.RUNNER_METRICS_RESET),
-    testConnectivity: (input) => ipcRenderer.invoke(IPC.RUNNER_CONNECTIVITY_TEST, input),
-    getClaudeHooksStatus: () => ipcRenderer.invoke(IPC.RUNNER_CLAUDE_HOOKS_STATUS_GET),
-    installClaudeHooks: () => ipcRenderer.invoke(IPC.RUNNER_CLAUDE_HOOKS_INSTALL),
-  },
-};
+interface IpcRendererLike {
+  invoke: (channel: string, ...args: unknown[]) => Promise<unknown>;
+  send: (channel: string, ...args: unknown[]) => void;
+  on: (channel: string, listener: (...args: any[]) => void) => void;
+  removeListener: (channel: string, listener: (...args: any[]) => void) => void;
+}
 
-contextBridge.exposeInMainWorld('multiclaude', api);
+interface ContextBridgeLike {
+  exposeInMainWorld: (key: string, value: unknown) => void;
+}
+
+export function createApi(ipcRenderer: IpcRendererLike): MultiClaudeAPI {
+  return {
+    config: {
+      getAll: () => ipcRenderer.invoke(IPC.CONFIG_GET_ALL),
+      create: (data) => ipcRenderer.invoke(IPC.CONFIG_CREATE, data),
+      update: (data) => ipcRenderer.invoke(IPC.CONFIG_UPDATE, data),
+      delete: (id) => ipcRenderer.invoke(IPC.CONFIG_DELETE, id),
+      duplicate: (id) => ipcRenderer.invoke(IPC.CONFIG_DUPLICATE, id),
+      export: () => ipcRenderer.invoke(IPC.CONFIG_EXPORT),
+      import: () => ipcRenderer.invoke(IPC.CONFIG_IMPORT),
+      onChanged: (callback) => {
+        const handler = () => callback();
+        ipcRenderer.on(IPC.CONFIG_CHANGED, handler);
+        return () => ipcRenderer.removeListener(IPC.CONFIG_CHANGED, handler);
+      },
+    },
+    terminal: {
+      spawn: (configId, options) => ipcRenderer.invoke(IPC.TERMINAL_SPAWN, configId, options),
+      write: (terminalId, data) => ipcRenderer.send(IPC.TERMINAL_WRITE, terminalId, data),
+      resize: (terminalId, cols, rows) => ipcRenderer.send(IPC.TERMINAL_RESIZE, terminalId, cols, rows),
+      kill: (terminalId) => ipcRenderer.send(IPC.TERMINAL_KILL, terminalId),
+      onData: (callback) => {
+        const handler = (_event: any, terminalId: string, data: string) => callback(terminalId, data);
+        ipcRenderer.on(IPC.TERMINAL_DATA, handler);
+        return () => ipcRenderer.removeListener(IPC.TERMINAL_DATA, handler);
+      },
+      onExit: (callback) => {
+        const handler = (_event: any, terminalId: string, code: number) => callback(terminalId, code);
+        ipcRenderer.on(IPC.TERMINAL_EXIT, handler);
+        return () => ipcRenderer.removeListener(IPC.TERMINAL_EXIT, handler);
+      },
+      onState: (callback) => {
+        const handler = (_event: any, terminalId: string, state: any) => callback(terminalId, state);
+        ipcRenderer.on(IPC.TERMINAL_STATE, handler);
+        return () => ipcRenderer.removeListener(IPC.TERMINAL_STATE, handler);
+      },
+      getStateSnapshot: () => ipcRenderer.invoke(IPC.TERMINAL_STATE_SNAPSHOT_GET),
+    },
+    systemTerminal: {
+      open: (configId, options) => ipcRenderer.invoke(IPC.SYSTEM_TERMINAL_OPEN, configId, options),
+    },
+    contextMenu: {
+      show: (terminalId, hasSelection) => ipcRenderer.send(IPC.CONTEXT_MENU_SHOW, terminalId, hasSelection),
+    },
+    menu: {
+      onAction: (callback) => {
+        const handler = (_event: any, action: string, payload?: any) => callback(action, payload);
+        ipcRenderer.on(IPC.MENU_ACTION, handler);
+        return () => ipcRenderer.removeListener(IPC.MENU_ACTION, handler);
+      },
+    },
+    app: {
+      onNotification: (callback) => {
+        const handler = (_event: any, title: string, body: string, terminalId?: string) => callback(title, body, terminalId);
+        ipcRenderer.on(IPC.APP_NOTIFICATION, handler);
+        return () => ipcRenderer.removeListener(IPC.APP_NOTIFICATION, handler);
+      },
+      getSettings: () => ipcRenderer.invoke(IPC.APP_GET_SETTINGS),
+      saveSettings: (settings) => ipcRenderer.invoke(IPC.APP_SAVE_SETTINGS, settings),
+      selectDirectory: (defaultPath) => ipcRenderer.invoke(IPC.APP_SELECT_DIRECTORY, defaultPath),
+      ensureDirectory: (path) => ipcRenderer.invoke(IPC.APP_ENSURE_DIRECTORY, path),
+      writeTextFile: (path, content) => ipcRenderer.invoke(IPC.APP_WRITE_TEXT_FILE, path, content),
+      setIgnoreMenuShortcuts: (ignore) => ipcRenderer.invoke(IPC.APP_SET_IGNORE_MENU_SHORTCUTS, ignore),
+    },
+    worktree: {
+      list: (repoPath) => ipcRenderer.invoke(IPC.WORKTREE_LIST, repoPath),
+      create: (input) => ipcRenderer.invoke(IPC.WORKTREE_CREATE, input),
+      remove: (input) => ipcRenderer.invoke(IPC.WORKTREE_REMOVE, input),
+      prune: (repoPath) => ipcRenderer.invoke(IPC.WORKTREE_PRUNE, repoPath),
+      status: (worktreePath) => ipcRenderer.invoke(IPC.WORKTREE_STATUS, worktreePath),
+      mergeReadiness: (worktreePath, targetRef) => ipcRenderer.invoke(IPC.WORKTREE_MERGE_READINESS, worktreePath, targetRef),
+      buildMergeTemplate: (input) => ipcRenderer.invoke(IPC.WORKTREE_MERGE_TEMPLATE, input),
+    },
+    protocol: {
+      startSession: (configId, terminalId) => ipcRenderer.invoke(IPC.RUNNER_SESSION_START, configId, terminalId),
+      ingestRawEvent: (sessionId, rawEvent) => ipcRenderer.invoke(IPC.RUNNER_EVENT_INGEST, sessionId, rawEvent),
+      resolveInput: (sessionId, requestId) => ipcRenderer.invoke(IPC.RUNNER_INPUT_RESOLVE, sessionId, requestId),
+      submitInput: (input) => ipcRenderer.invoke(IPC.RUNNER_INPUT_SUBMIT, input),
+      interruptSession: (sessionId) => ipcRenderer.invoke(IPC.RUNNER_SESSION_INTERRUPT, sessionId),
+      stopSession: (sessionId) => ipcRenderer.invoke(IPC.RUNNER_SESSION_STOP, sessionId),
+      endSession: (sessionId) => ipcRenderer.invoke(IPC.RUNNER_SESSION_END, sessionId),
+      onEvent: (callback) => {
+        const handler = (_event: any, runnerEvent: any) => callback(runnerEvent);
+        ipcRenderer.on(IPC.RUNNER_EVENT, handler);
+        return () => ipcRenderer.removeListener(IPC.RUNNER_EVENT, handler);
+      },
+      getMetrics: () => ipcRenderer.invoke(IPC.RUNNER_METRICS_GET),
+      resetMetrics: () => ipcRenderer.invoke(IPC.RUNNER_METRICS_RESET),
+      testConnectivity: (input) => ipcRenderer.invoke(IPC.RUNNER_CONNECTIVITY_TEST, input),
+      getClaudeHooksStatus: () => ipcRenderer.invoke(IPC.RUNNER_CLAUDE_HOOKS_STATUS_GET),
+      installClaudeHooks: () => ipcRenderer.invoke(IPC.RUNNER_CLAUDE_HOOKS_INSTALL),
+    },
+  };
+}
+
+export function initializePreload(electronLike?: {
+  contextBridge?: ContextBridgeLike;
+  ipcRenderer?: IpcRendererLike;
+} | null): boolean {
+  let runtime = electronLike || null;
+  if (!runtime) {
+    try {
+      runtime = require('electron');
+    } catch {
+      return false;
+    }
+  }
+  if (!runtime?.contextBridge || !runtime?.ipcRenderer) {
+    return false;
+  }
+
+  const api = createApi(runtime.ipcRenderer);
+  runtime.contextBridge.exposeInMainWorld('multiclaude', api);
+  return true;
+}
+
+initializePreload();

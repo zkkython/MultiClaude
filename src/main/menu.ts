@@ -1,22 +1,68 @@
-import { app, Menu, BrowserWindow, shell } from 'electron';
 import { IPC } from '../shared/constants.js';
 
-const isMac = process.platform === 'darwin';
+interface MenuLike {
+  buildFromTemplate: (template: Electron.MenuItemConstructorOptions[]) => unknown;
+  setApplicationMenu: (menu: unknown) => void;
+}
 
-export function createAppMenu(): void {
+interface FocusedWindowLike {
+  isFullScreen: () => boolean;
+  setFullScreen: (value: boolean) => void;
+  webContents: {
+    send: (channel: string, action: string, payload?: any) => void;
+  };
+}
+
+interface MenuDeps {
+  getAppName: () => string;
+  isMac: () => boolean;
+  getMenu: () => MenuLike;
+  getFocusedWindow: () => FocusedWindowLike | null;
+  openExternal: (url: string) => void;
+}
+
+const defaultDeps: MenuDeps = {
+  getAppName: () => {
+    const { app } = require('electron') as typeof import('electron');
+    return app.name;
+  },
+  isMac: () => process.platform === 'darwin',
+  getMenu: () => {
+    const { Menu } = require('electron') as typeof import('electron');
+    return Menu;
+  },
+  getFocusedWindow: () => {
+    const { BrowserWindow } = require('electron') as typeof import('electron');
+    return BrowserWindow.getFocusedWindow() as FocusedWindowLike | null;
+  },
+  openExternal: (url: string) => {
+    const { shell } = require('electron') as typeof import('electron');
+    void shell.openExternal(url);
+  },
+};
+
+function sendMenuAction(deps: MenuDeps, action: string, payload?: any): void {
+  const win = deps.getFocusedWindow();
+  if (win) {
+    win.webContents.send(IPC.MENU_ACTION, action, payload);
+  }
+}
+
+export function buildAppMenuTemplate(depsInput?: Partial<MenuDeps>): Electron.MenuItemConstructorOptions[] {
+  const deps = { ...defaultDeps, ...(depsInput || {}) };
+  const isMac = deps.isMac();
   const template: Electron.MenuItemConstructorOptions[] = [];
 
-  // macOS App menu
   if (isMac) {
     template.push({
-      label: app.name,
+      label: deps.getAppName(),
       submenu: [
         { role: 'about' },
         { type: 'separator' },
         {
           label: 'Preferences...',
           accelerator: 'Cmd+,',
-          click: () => sendMenuAction('preferences'),
+          click: () => sendMenuAction(deps, 'preferences'),
         },
         { type: 'separator' },
         { role: 'hide' },
@@ -28,36 +74,34 @@ export function createAppMenu(): void {
     });
   }
 
-  // File menu
   template.push({
     label: 'File',
     submenu: [
       {
         label: 'New Terminal',
         accelerator: 'CmdOrCtrl+T',
-        click: () => sendMenuAction('new-terminal'),
+        click: () => sendMenuAction(deps, 'new-terminal'),
       },
       {
         label: 'New System Terminal',
         accelerator: 'CmdOrCtrl+Shift+T',
-        click: () => sendMenuAction('new-system-terminal'),
+        click: () => sendMenuAction(deps, 'new-system-terminal'),
       },
       {
         label: 'New Worktree Terminal',
         accelerator: 'CmdOrCtrl+Alt+T',
-        click: () => sendMenuAction('new-worktree-terminal'),
+        click: () => sendMenuAction(deps, 'new-worktree-terminal'),
       },
       { type: 'separator' },
       {
         label: 'Close Terminal',
         accelerator: 'CmdOrCtrl+W',
-        click: () => sendMenuAction('close-terminal'),
+        click: () => sendMenuAction(deps, 'close-terminal'),
       },
       ...(isMac ? [] : [{ type: 'separator' as const }, { role: 'quit' as const }]),
     ],
   });
 
-  // Edit menu
   template.push({
     label: 'Edit',
     submenu: [
@@ -73,117 +117,114 @@ export function createAppMenu(): void {
         {
           label: 'Preferences...',
           accelerator: 'Ctrl+,',
-          click: () => sendMenuAction('preferences'),
+          click: () => sendMenuAction(deps, 'preferences'),
         },
       ]),
     ],
   });
 
-  // Config menu
   template.push({
     label: 'Config',
     submenu: [
       {
         label: 'New Config',
         accelerator: 'CmdOrCtrl+N',
-        click: () => sendMenuAction('new-config'),
+        click: () => sendMenuAction(deps, 'new-config'),
       },
       {
         label: 'Edit Config',
         accelerator: 'CmdOrCtrl+E',
-        click: () => sendMenuAction('edit-config'),
+        click: () => sendMenuAction(deps, 'edit-config'),
       },
       {
         label: 'Duplicate Config',
         accelerator: 'CmdOrCtrl+D',
-        click: () => sendMenuAction('duplicate-config'),
+        click: () => sendMenuAction(deps, 'duplicate-config'),
       },
       {
         label: 'Delete Config',
-        click: () => sendMenuAction('delete-config'),
+        click: () => sendMenuAction(deps, 'delete-config'),
       },
       { type: 'separator' },
       {
         label: 'Import Configs...',
-        click: () => sendMenuAction('import-configs'),
+        click: () => sendMenuAction(deps, 'import-configs'),
       },
       {
         label: 'Export Configs...',
-        click: () => sendMenuAction('export-configs'),
+        click: () => sendMenuAction(deps, 'export-configs'),
       },
     ],
   });
 
-  // Terminal menu
   template.push({
     label: 'Terminal',
     submenu: [
       {
         label: 'Next Tab',
         accelerator: 'CmdOrCtrl+Shift+]',
-        click: () => sendMenuAction('next-tab'),
+        click: () => sendMenuAction(deps, 'next-tab'),
       },
       {
         label: 'Previous Tab',
         accelerator: 'CmdOrCtrl+Shift+[',
-        click: () => sendMenuAction('prev-tab'),
+        click: () => sendMenuAction(deps, 'prev-tab'),
       },
       {
         label: 'Next Waiting Terminal',
         accelerator: 'CmdOrCtrl+;',
-        click: () => sendMenuAction('next-waiting'),
+        click: () => sendMenuAction(deps, 'next-waiting'),
       },
       { type: 'separator' },
       ...Array.from({ length: 9 }, (_, i) => ({
         label: `Go to Tab ${i + 1}`,
         accelerator: `CmdOrCtrl+${i + 1}` as string,
-        click: () => sendMenuAction('go-to-tab', i),
+        click: () => sendMenuAction(deps, 'go-to-tab', i),
       })),
       { type: 'separator' },
       {
         label: 'Clear Terminal',
         accelerator: 'CmdOrCtrl+K',
-        click: () => sendMenuAction('clear-terminal'),
+        click: () => sendMenuAction(deps, 'clear-terminal'),
       },
       { type: 'separator' },
       {
         label: 'Auto Group by Config',
-        click: () => sendMenuAction('auto-group-by-config'),
+        click: () => sendMenuAction(deps, 'auto-group-by-config'),
       },
     ],
   });
 
-  // View menu
   template.push({
     label: 'View',
     submenu: [
       {
         label: 'Toggle Sidebar',
         accelerator: 'CmdOrCtrl+B',
-        click: () => sendMenuAction('toggle-sidebar'),
+        click: () => sendMenuAction(deps, 'toggle-sidebar'),
       },
       { type: 'separator' },
       {
         label: 'Zoom In',
         accelerator: 'CmdOrCtrl+=',
-        click: () => sendMenuAction('zoom-in'),
+        click: () => sendMenuAction(deps, 'zoom-in'),
       },
       {
         label: 'Zoom Out',
         accelerator: 'CmdOrCtrl+-',
-        click: () => sendMenuAction('zoom-out'),
+        click: () => sendMenuAction(deps, 'zoom-out'),
       },
       {
         label: 'Reset Zoom',
         accelerator: 'CmdOrCtrl+0',
-        click: () => sendMenuAction('zoom-reset'),
+        click: () => sendMenuAction(deps, 'zoom-reset'),
       },
       { type: 'separator' },
       {
         label: 'Toggle Full Screen',
         accelerator: isMac ? 'Cmd+Ctrl+F' : 'F11',
         click: () => {
-          const win = BrowserWindow.getFocusedWindow();
+          const win = deps.getFocusedWindow();
           if (win) {
             win.setFullScreen(!win.isFullScreen());
           }
@@ -194,28 +235,27 @@ export function createAppMenu(): void {
     ],
   });
 
-  // Help menu
   template.push({
     label: 'Help',
     submenu: [
       {
         label: 'Documentation',
-        click: () => shell.openExternal('https://github.com/zkkython/MultiClaude'),
+        click: () => deps.openExternal('https://github.com/zkkython/MultiClaude'),
       },
       {
         label: 'Report Issue',
-        click: () => shell.openExternal('https://github.com/zkkython/MultiClaude/issues'),
+        click: () => deps.openExternal('https://github.com/zkkython/MultiClaude/issues'),
       },
     ],
   });
 
-  const menu = Menu.buildFromTemplate(template);
-  Menu.setApplicationMenu(menu);
+  return template;
 }
 
-function sendMenuAction(action: string, payload?: any): void {
-  const win = BrowserWindow.getFocusedWindow();
-  if (win) {
-    win.webContents.send(IPC.MENU_ACTION, action, payload);
-  }
+export function createAppMenu(depsInput?: Partial<MenuDeps>): void {
+  const deps = { ...defaultDeps, ...(depsInput || {}) };
+  const menu = deps.getMenu();
+  const template = buildAppMenuTemplate(deps);
+  const built = menu.buildFromTemplate(template);
+  menu.setApplicationMenu(built);
 }

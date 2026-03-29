@@ -1,4 +1,3 @@
-import { app } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import type {
@@ -9,7 +8,6 @@ import type {
   ImportResult,
 } from '../shared/types.js';
 import { DEFAULTS } from '../shared/constants.js';
-import { getCodexHomePath, getEnvFilePath, getZdotdirPath } from './config-paths.js';
 
 const CONFIG_SCHEMA_VERSION = 2;
 
@@ -20,6 +18,84 @@ interface ConfigFileV2 {
 
 let nanoid: (size?: number) => string;
 
+interface ConfigStorePathDeps {
+  getEnvFilePath: (configId: string) => string;
+  getZdotdirPath: (configId: string) => string;
+  getCodexHomePath: (config: Pick<ModelConfig, 'id' | 'codexHomeName'>) => string;
+}
+
+interface ConfigStoreFsDeps {
+  existsSync: typeof fs.existsSync;
+  readFileSync: typeof fs.readFileSync;
+  writeFileSync: typeof fs.writeFileSync;
+  mkdirSync: typeof fs.mkdirSync;
+  rmSync: typeof fs.rmSync;
+}
+
+interface ConfigStoreDeps {
+  appGetPath: (name: string) => string;
+  fs: ConfigStoreFsDeps;
+  paths: ConfigStorePathDeps;
+  nowIso: () => string;
+}
+
+const defaultDeps: ConfigStoreDeps = {
+  appGetPath: (_name: string) => '',
+  fs: {
+    existsSync: fs.existsSync,
+    readFileSync: fs.readFileSync,
+    writeFileSync: fs.writeFileSync,
+    mkdirSync: fs.mkdirSync,
+    rmSync: fs.rmSync,
+  },
+  paths: {
+    getEnvFilePath: () => '',
+    getZdotdirPath: () => '',
+    getCodexHomePath: () => '',
+  },
+  nowIso: () => new Date().toISOString(),
+};
+
+let configStoreDeps: ConfigStoreDeps | null = null;
+
+function resolveDefaultDeps(): ConfigStoreDeps {
+  const electronMod = require('electron') as typeof import('electron');
+  const configPaths = require('./config-paths.js') as typeof import('./config-paths.js');
+  return {
+    ...defaultDeps,
+    appGetPath: (name: string) => electronMod.app.getPath(name as any),
+    paths: {
+      getEnvFilePath: configPaths.getEnvFilePath,
+      getZdotdirPath: configPaths.getZdotdirPath,
+      getCodexHomePath: configPaths.getCodexHomePath,
+    },
+  };
+}
+
+function getDeps(): ConfigStoreDeps {
+  if (configStoreDeps) return configStoreDeps;
+  configStoreDeps = resolveDefaultDeps();
+  return configStoreDeps;
+}
+
+export function __setConfigStoreDepsForTest(deps: Partial<ConfigStoreDeps> | null): void {
+  if (!deps) {
+    configStoreDeps = null;
+    return;
+  }
+  const base = configStoreDeps || {
+    ...defaultDeps,
+    ...(deps.appGetPath ? { appGetPath: deps.appGetPath } : {}),
+    ...(deps.paths ? { paths: deps.paths as ConfigStorePathDeps } : {}),
+  };
+  configStoreDeps = {
+    ...base,
+    ...deps,
+    fs: { ...base.fs, ...(deps.fs || {}) },
+    paths: { ...base.paths, ...(deps.paths || {}) },
+  };
+}
+
 async function ensureNanoid() {
   if (!nanoid) {
     const mod = await import('nanoid');
@@ -28,15 +104,15 @@ async function ensureNanoid() {
 }
 
 function getConfigPath(): string {
-  return path.join(app.getPath('userData'), 'configs.json');
+  return path.join(getDeps().appGetPath('userData'), 'configs.json');
 }
 
 function getConfigBackupPath(): string {
-  return path.join(app.getPath('userData'), 'configs.v1.backup.json');
+  return path.join(getDeps().appGetPath('userData'), 'configs.v1.backup.json');
 }
 
 function getSettingsPath(): string {
-  return path.join(app.getPath('userData'), 'settings.json');
+  return path.join(getDeps().appGetPath('userData'), 'settings.json');
 }
 
 function isProvider(value: unknown): value is ConfigProvider {
@@ -113,12 +189,12 @@ function hasRequiredFields(config: ModelConfig): boolean {
 
 function readConfigsRaw(): { configs: ModelConfig[]; migrated: boolean; rawText: string | null } {
   const configPath = getConfigPath();
-  if (!fs.existsSync(configPath)) {
+  if (!getDeps().fs.existsSync(configPath)) {
     return { configs: [], migrated: false, rawText: null };
   }
 
   try {
-    const text = fs.readFileSync(configPath, 'utf-8');
+    const text = getDeps().fs.readFileSync(configPath, 'utf-8');
     const parsed = JSON.parse(text);
 
     if (Array.isArray(parsed)) {
@@ -146,21 +222,21 @@ function readConfigsRaw(): { configs: ModelConfig[]; migrated: boolean; rawText:
 function writeConfigFile(configs: ModelConfig[]): void {
   const configPath = getConfigPath();
   const dir = path.dirname(configPath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+  if (!getDeps().fs.existsSync(dir)) {
+    getDeps().fs.mkdirSync(dir, { recursive: true });
   }
   const payload = {
     schemaVersion: CONFIG_SCHEMA_VERSION,
     configs,
   };
-  fs.writeFileSync(configPath, JSON.stringify(payload, null, 2), { mode: 0o600 });
+  getDeps().fs.writeFileSync(configPath, JSON.stringify(payload, null, 2), { mode: 0o600 });
 }
 
 function backupV1IfNeeded(rawText: string | null): void {
   if (!rawText) return;
   const backupPath = getConfigBackupPath();
-  if (fs.existsSync(backupPath)) return;
-  fs.writeFileSync(backupPath, rawText, { mode: 0o600 });
+  if (getDeps().fs.existsSync(backupPath)) return;
+  getDeps().fs.writeFileSync(backupPath, rawText, { mode: 0o600 });
 }
 
 function readConfigs(): ModelConfig[] {
@@ -182,15 +258,16 @@ function withoutSecrets(config: ModelConfig): Omit<ModelConfig, 'id' | 'createdA
 }
 
 function cleanupConfigArtifacts(config: ModelConfig): void {
-  const envFilePath = getEnvFilePath(config.id);
-  const zdotdirPath = getZdotdirPath(config.id);
+  const deps = getDeps();
+  const envFilePath = deps.paths.getEnvFilePath(config.id);
+  const zdotdirPath = deps.paths.getZdotdirPath(config.id);
 
-  fs.rmSync(envFilePath, { force: true });
-  fs.rmSync(zdotdirPath, { recursive: true, force: true });
+  deps.fs.rmSync(envFilePath, { force: true });
+  deps.fs.rmSync(zdotdirPath, { recursive: true, force: true });
 
   if (config.provider === 'codex') {
-    const codexHomePath = getCodexHomePath(config);
-    fs.rmSync(codexHomePath, { recursive: true, force: true });
+    const codexHomePath = deps.paths.getCodexHomePath(config);
+    deps.fs.rmSync(codexHomePath, { recursive: true, force: true });
   }
 }
 
@@ -201,7 +278,7 @@ export function getAllConfigs(): ModelConfig[] {
 export async function createConfig(data: ModelConfigCreate): Promise<ModelConfig> {
   await ensureNanoid();
   const configs = readConfigs();
-  const now = new Date().toISOString();
+  const now = getDeps().nowIso();
 
   const normalized = normalizeConfig(
     {
@@ -233,7 +310,7 @@ export function updateConfig(data: ModelConfigUpdate): ModelConfig {
     {
       ...configs[index],
       ...data,
-      updatedAt: new Date().toISOString(),
+      updatedAt: getDeps().nowIso(),
     },
     configs[index].sortOrder
   );
@@ -266,7 +343,7 @@ export async function duplicateConfig(id: string): Promise<ModelConfig> {
     throw new Error(`Config not found: ${id}`);
   }
 
-  const now = new Date().toISOString();
+  const now = getDeps().nowIso();
   const duplicate: ModelConfig = {
     ...source,
     id: nanoid(12),
@@ -291,7 +368,7 @@ export async function exportConfigs(filePath: string): Promise<boolean> {
       schemaVersion: CONFIG_SCHEMA_VERSION,
       configs: configs.map(withoutSecrets),
     };
-    fs.writeFileSync(filePath, JSON.stringify(exportData, null, 2));
+    getDeps().fs.writeFileSync(filePath, JSON.stringify(exportData, null, 2));
     return true;
   } catch (err) {
     console.error('Failed to export configs:', err);
@@ -304,7 +381,7 @@ export async function importConfigs(filePath: string): Promise<ImportResult> {
   const result: ImportResult = { imported: 0, skipped: 0, errors: [] };
 
   try {
-    const data = fs.readFileSync(filePath, 'utf-8');
+    const data = getDeps().fs.readFileSync(filePath, 'utf-8');
     const parsed = JSON.parse(data);
     const imported = Array.isArray(parsed) ? parsed : parsed?.configs;
 
@@ -321,8 +398,8 @@ export async function importConfigs(filePath: string): Promise<ImportResult> {
         {
           ...item,
           id: nanoid(12),
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
+          createdAt: getDeps().nowIso(),
+          updatedAt: getDeps().nowIso(),
           sortOrder: existing.length + result.imported,
         },
         existing.length + result.imported
@@ -374,8 +451,8 @@ export function getSettings(): {
 } {
   const settingsPath = getSettingsPath();
   try {
-    if (fs.existsSync(settingsPath)) {
-      const data = fs.readFileSync(settingsPath, 'utf-8');
+    if (getDeps().fs.existsSync(settingsPath)) {
+      const data = getDeps().fs.readFileSync(settingsPath, 'utf-8');
       return {
         sidebarWidth: DEFAULTS.SIDEBAR_WIDTH,
         groups: [],
@@ -402,8 +479,8 @@ export function saveSettings(settings: Record<string, any>): void {
   const current = getSettings();
   const merged = { ...current, ...settings };
   const dir = path.dirname(settingsPath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+  if (!getDeps().fs.existsSync(dir)) {
+    getDeps().fs.mkdirSync(dir, { recursive: true });
   }
-  fs.writeFileSync(settingsPath, JSON.stringify(merged, null, 2));
+  getDeps().fs.writeFileSync(settingsPath, JSON.stringify(merged, null, 2));
 }

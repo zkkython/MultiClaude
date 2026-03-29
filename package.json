@@ -16,13 +16,15 @@
     "dist:mac:p12": "npm run build && electron-builder --mac",
     "dist:mac:nonotarize": "npm run build && node scripts/dist-mac-nonotarize.js",
     "notarize:mac": "node scripts/notarize-mac-dmg.js",
-    "test": "node scripts/test.js"
+    "test": "node scripts/test.js",
+    "test:coverage": "node scripts/test-coverage.js"
   },
   "author": "kason",
   "license": "MIT",
   "devDependencies": {
     "@electron/notarize": "^2.5.0",
     "@electron/rebuild": "^3.7.1",
+    "c8": "^10.1.3",
     "electron": "^34.0.0",
     "electron-builder": "^25.1.8",
     "esbuild": "^0.24.2",

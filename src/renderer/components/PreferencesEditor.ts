@@ -19,27 +19,7 @@ export function showPreferencesEditor(
   const modal = document.createElement('div');
   modal.className = 'modal preferences-editor';
 
-  modal.innerHTML = `
-    <div class="modal-header">
-      <h2>Preferences</h2>
-      <button class="btn btn-icon modal-close-btn">✕</button>
-    </div>
-    <div class="modal-body">
-      <form id="preferences-form">
-        <div class="form-group">
-          <label>
-            <input type="checkbox" id="pref-use-webgl-renderer" ${settings.useWebglRenderer ? 'checked' : ''} />
-            Use WebGL terminal renderer (experimental)
-          </label>
-          <div class="form-help">Improves performance on some GPUs, but may cause long-session artifacts. Reopen terminals after changing this option.</div>
-        </div>
-      </form>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" id="preferences-cancel">Cancel</button>
-      <button class="btn btn-primary" id="preferences-save">Save</button>
-    </div>
-  `;
+  modal.innerHTML = buildPreferencesEditorMarkup(settings);
 
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
@@ -74,4 +54,28 @@ export function showPreferencesEditor(
     teardownDialogA11y();
     overlay.remove();
   }
+}
+
+export function buildPreferencesEditorMarkup(settings: AppSettings): string {
+  return `
+    <div class="modal-header">
+      <h2>Preferences</h2>
+      <button class="btn btn-icon modal-close-btn">✕</button>
+    </div>
+    <div class="modal-body">
+      <form id="preferences-form">
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="pref-use-webgl-renderer" ${settings.useWebglRenderer ? 'checked' : ''} />
+            Use WebGL terminal renderer (experimental)
+          </label>
+          <div class="form-help">Improves performance on some GPUs, but may cause long-session artifacts. Reopen terminals after changing this option.</div>
+        </div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="preferences-cancel">Cancel</button>
+      <button class="btn btn-primary" id="preferences-save">Save</button>
+    </div>
+  `;
 }
