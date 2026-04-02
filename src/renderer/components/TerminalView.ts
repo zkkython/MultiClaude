@@ -15,7 +15,8 @@ interface TerminalInstance {
 
 const instances = new Map<string, TerminalInstance>();
 let menuShortcutsIgnored = false;
-const FORCE_LINE_NAV_STEPS = 256;
+const CTRL_A = '\x01';
+const CTRL_E = '\x05';
 
 function cssVar(name: string, fallback: string): string {
   const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -131,16 +132,31 @@ export function createTerminalView(
       return false;
     }
     if (event.type !== 'keydown') return true;
+    if (event.metaKey && !event.ctrlKey && !event.altKey) {
+      const key = event.key.toLowerCase();
+      if (key === 'c') {
+        if (terminal.hasSelection()) {
+          void navigator.clipboard.writeText(terminal.getSelection());
+        }
+        return false;
+      }
+      if (key === 'v') {
+        void navigator.clipboard.readText().then(text => {
+          window.multiclaude.terminal.write(terminalId, text);
+        });
+        return false;
+      }
+    }
     if (!event.ctrlKey || event.metaKey || event.altKey) return true;
     const key = event.key.toLowerCase();
     if (key === 'a') {
-      // Hard fallback: move cursor to start by repeated Left key strokes.
-      window.multiclaude.terminal.write(terminalId, '\x1b[D'.repeat(FORCE_LINE_NAV_STEPS));
+      // Use canonical control bytes to avoid IME/preedit desync after
+      // synthetic arrow-key storms in shell line editors.
+      window.multiclaude.terminal.write(terminalId, CTRL_A);
       return false;
     }
     if (key === 'e') {
-      // Hard fallback: move cursor to end by repeated Right key strokes.
-      window.multiclaude.terminal.write(terminalId, '\x1b[C'.repeat(FORCE_LINE_NAV_STEPS));
+      window.multiclaude.terminal.write(terminalId, CTRL_E);
       return false;
     }
     return true;
