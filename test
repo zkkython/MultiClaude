@@ -1,0 +1,1225 @@
+# 课时2 - 引擎模块和流式执行
+
+> **关键源码文件**：
+> - `vllm/v1/engine/core.py` -- EngineCore 和 EngineCoreProc，包含 input/output socket 线程
+> - `vllm/v1/engine/async_llm.py` -- AsyncLLM 前端，generate 和 output_handler
+> - `vllm/v1/engine/core_client.py` -- EngineCoreClient / AsyncMPClient / SyncMPClient，ZMQ 通信客户端
+> - `vllm/v1/engine/output_processor.py` -- OutputProcessor，输出处理和分发
+> - `vllm/v1/serial_utils.py` -- MsgpackEncoder / MsgpackDecoder，序列化工具
+
+## 学习目标
+
+1. 理解 ZMQ 三种通信模式（REQ/REP、DEALER/ROUTER、PULL/PUSH）在 vLLM 中的应用场景
+2. 掌握 EngineCore 的输入/输出 socket 线程的工作原理，理解消息的序列化与反序列化流程
+3. 理解 AsyncLLM 如何通过 EngineCoreClient 发送请求到 EngineCore 后台进程
+4. 掌握 output_handler 如何拉取 EngineCore 输出并通过 OutputProcessor 分发给每个请求的异步队列
+5. 理解 vLLM 中零拷贝、buffer 复用等性能优化技巧
+
+---
+
+## 2.1 ZMQ 通信模式基础
+
+### 原理讲解
+
+vLLM V1 引擎架构基于多进程设计：前端（AsyncLLM）运行在主进程中，而 EngineCore 运行在独立的后台进程里。两者之间的通信完全依赖 ZeroMQ（ZMQ）消息队列。在深入 vLLM 的通信实现之前，我们需要先理解 ZMQ 的三种核心通信模式。
+
+#### 2.1.1 REQ/REP 模式（请求-应答）
+
+REQ/REP 是最基础的通信模式，遵循严格的 "一问一答" 模式：
+
+```
+Client (REQ)                    Server (REP)
+   |                                |
+   |--- send(request) ------------>|
+   |                                |--- recv() 处理请求
+   |                                |--- send(response) 
+   |<-------- recv(response) ------|
+   |                                |
+```
+
+**特点**：
+- 严格的同步模式：发送后必须等待接收，不能连续发送两条消息
+- 简单可靠，适合一对一的 RPC 调用
+- **局限性**：无法处理异步或多客户端场景
+
+在 vLLM 中，纯 REQ/REP 模式并未直接使用，因为推理引擎需要异步处理多个请求。
+
+#### 2.1.2 DEALER/ROUTER 模式（多对一异步通信）
+
+DEALER/ROUTER 是 REQ/REP 的异步升级版。ROUTER 可以同时处理多个 DEALER 的消息，每个 DEALER 有唯一标识（identity）。
+
+```
+DEALER-0 (engine_0)             ROUTER (front-end)
+   |--- [identity|msg] ------->|
+                                |  可以区分消息来源
+DEALER-1 (engine_1)             |  可以异步回复任意 DEALER
+   |--- [identity|msg] ------->|
+                                |
+   |<-- [identity|reply] ------|
+```
+
+**特点**：
+- ROUTER 自动为每条消息添加发送方 identity 前缀
+- ROUTER 可以根据 identity 将回复路由到特定 DEALER
+- 支持异步：DEALER 无需等待回复即可发送下一条消息
+- **在 vLLM 中**：用于 EngineCore 进程 -> 前端的 input socket 通信，尤其在多 EngineCore（数据并行）场景下
+
+#### 2.1.3 PULL/PUSH 模式（单向推送）
+
+PULL/PUSH 是最简单的单向通信管道：
+
+```
+PUSH (engine_core)              PULL (front-end)
+   |--- send(output) --------->|
+   |--- send(output) --------->|
+   |--- send(output) --------->|
+```
+
+**特点**：
+- 纯单向通信，生产者推送、消费者拉取
+- 多个 PUSH 可以连接到同一个 PULL（fan-in 模式）
+- **在 vLLM 中**：用于 EngineCore 进程向前端推送推理输出（EngineCoreOutputs）
+
+### 源码解析
+
+vLLM 中 ZMQ socket 类型的选择可以在以下关键位置找到。
+
+**input socket -- DEALER/ROUTER**
+
+前端（MPClient）创建 ROUTER socket 用于接收来自 EngineCore 的消息：
+
+```python
+# vllm/v1/engine/core_client.py 第395-396行
+self.input_socket = self.resources.input_socket = make_zmq_socket(
+    self.ctx, input_address, zmq.ROUTER, bind=True)
+```
+
+EngineCore 进程使用 DEALER socket 连接前端：
+
+```python
+# vllm/v1/engine/core.py 第373-377行
+input_socket = make_zmq_socket(input_ctx,
+                               input_address,
+                               zmq.DEALER,
+                               identity=identity,
+                               bind=False)
+```
+
+每个 EngineCore 用其 `engine_index` 作为 identity，这样前端的 ROUTER 就能区分来自不同引擎的消息。
+
+**output socket -- PUSH/PULL**
+
+前端创建 PULL socket 来拉取输出：
+
+```python
+# vllm/v1/engine/core_client.py 第398-399行
+self.resources.output_socket = make_zmq_socket(
+    self.ctx, output_address, zmq.constants.PULL)
+```
+
+EngineCore 进程创建 PUSH socket 来推送输出：
+
+```python
+# vllm/v1/engine/core.py 第637-638行
+with zmq_socket_ctx(output_path, zmq.constants.PUSH,
+                    linger=4000) as socket:
+```
+
+### 代码示例
+
+以下代码演示 DEALER/ROUTER 和 PUSH/PULL 的基本用法：
+
+```python
+"""
+演示 vLLM 中使用的两种 ZMQ 通信模式
+"""
+import zmq
+import threading
+import time
+
+def demo_dealer_router():
+    """DEALER/ROUTER 模式：多引擎 -> 前端"""
+    ctx = zmq.Context()
+    
+    # 前端：ROUTER socket（类似 vLLM 的 MPClient.input_socket）
+    router = ctx.socket(zmq.ROUTER)
+    router.bind("tcp://127.0.0.1:5555")
+    
+    def engine_worker(engine_id: int):
+        """模拟 EngineCore 进程"""
+        dealer = ctx.socket(zmq.DEALER)
+        # 设置 identity，类似 vLLM 中 engine_index.to_bytes(...)
+        dealer.identity = engine_id.to_bytes(2, byteorder="little")
+        dealer.connect("tcp://127.0.0.1:5555")
+        
+        # 发送消息（类似 EngineCore 的 startup_handshake）
+        dealer.send_string(f"HELLO from engine {engine_id}")
+        time.sleep(0.1)
+        dealer.close()
+    
+    # 启动两个 "引擎"
+    for i in range(2):
+        threading.Thread(target=engine_worker, args=(i,)).start()
+    
+    # 前端接收消息
+    for _ in range(2):
+        identity, message = router.recv_multipart()
+        engine_id = int.from_bytes(identity, byteorder="little")
+        print(f"[ROUTER] 收到来自 engine {engine_id} 的消息: {message.decode()}")
+    
+    router.close()
+    ctx.term()
+
+def demo_push_pull():
+    """PUSH/PULL 模式：引擎 -> 前端单向推送"""
+    ctx = zmq.Context()
+    
+    # 前端：PULL socket（类似 vLLM 的 output_socket）
+    pull = ctx.socket(zmq.PULL)
+    pull.bind("tcp://127.0.0.1:5556")
+    
+    def producer():
+        """模拟 EngineCore 的 output socket 线程"""
+        push = ctx.socket(zmq.PUSH)
+        push.connect("tcp://127.0.0.1:5556")
+        for i in range(3):
+            push.send_string(f"Output batch {i}")
+            time.sleep(0.05)
+        push.close()
+    
+    threading.Thread(target=producer).start()
+    
+    for _ in range(3):
+        msg = pull.recv_string()
+        print(f"[PULL] 收到: {msg}")
+    
+    pull.close()
+    ctx.term()
+
+if __name__ == "__main__":
+    print("=== DEALER/ROUTER Demo ===")
+    demo_dealer_router()
+    print("\n=== PUSH/PULL Demo ===")
+    demo_push_pull()
+```
+
+### 架构总览
+
+```
+                         vLLM V1 ZMQ 通信架构
+  ========================================================================
+
+  AsyncLLM (主进程)                           EngineCore (后台进程)
+  +----------------------------+              +---------------------------+
+  |                            |              |                           |
+  |  EngineCoreClient         |              |  EngineCoreProc           |
+  |  (AsyncMPClient)          |              |                           |
+  |                            |              |                           |
+  |  +--[ROUTER socket]-------+--DEALER------+-> process_input_socket   |
+  |  | input_socket            |   ZMQ IPC   |   (后台线程)              |
+  |  |                         |              |        |                  |
+  |  | send_multipart()       |              |        v                  |
+  |  |  (identity,type,data)  |              |   input_queue (Queue)     |
+  |  |                         |              |        |                  |
+  |  +-------------------------+              |        v                  |
+  |                            |              |   run_busy_loop()        |
+  |                            |              |    -> schedule()          |
+  |                            |              |    -> execute_model()     |
+  |                            |              |        |                  |
+  |  +--[PULL socket]---------+--PUSH--------+-- process_output_socket  |
+  |  | output_socket           |   ZMQ IPC   |   (后台线程)              |
+  |  |                         |              |        ^                  |
+  |  | recv_multipart()       |              |   output_queue (Queue)    |
+  |  |     |                   |              |                           |
+  |  +-----+------------------+              +---------------------------+
+  |        |                   |
+  |        v                   |
+  |  output_handler (Task)    |
+  |   -> OutputProcessor      |
+  |   -> per-request queue    |
+  |        |                   |
+  |        v                   |
+  |  generate() yields        |
+  |  RequestOutput            |
+  +----------------------------+
+```
+
+---
+
+## 2.2 Engine 接收数据 -- EngineCore 的 input socket 线程
+
+### 原理讲解
+
+EngineCore 进程启动后，会创建一个后台守护线程来处理 input socket 的 IO 操作。这个线程的职责是：
+
+1. 从 ZMQ DEALER socket 接收消息帧
+2. 反序列化请求数据（使用 MsgpackDecoder）
+3. 将解析后的请求放入 `input_queue`（一个线程安全的 `queue.Queue`）
+
+这种设计将 ZMQ 网络 IO 与 EngineCore 的计算逻辑解耦。由于 ZMQ 操作会释放 GIL，这意味着 input socket 线程可以与 GPU 计算并行运行。
+
+### 源码解析
+
+**input_queue 和线程创建**
+
+在 `EngineCoreProc.__init__` 中（`vllm/v1/engine/core.py` 第365-416行），可以看到 input_queue 的创建和后台线程的启动：
+
+```python
+# vllm/v1/engine/core.py 第365行
+input_queue = queue.Queue[tuple[EngineCoreRequestType, Any]]()
+
+# ... 初始化引擎 ...
+
+# 第411行：创建 input_queue 引用
+self.input_queue = input_queue
+
+# 第413-415行：启动 input socket 后台线程
+threading.Thread(target=self.process_input_socket,
+                 args=(input_socket, ),
+                 daemon=True).start()
+```
+
+**process_input_socket 方法**
+
+这是 input socket 线程的核心逻辑（`vllm/v1/engine/core.py` 第603-621行）：
+
+```python
+def process_input_socket(self, input_socket: zmq.Socket):
+    """Input socket IO thread."""
+
+    # Msgpack serialization decoding.
+    add_request_decoder = MsgpackDecoder(EngineCoreRequest)  # 专用解码器
+    generic_decoder = MsgpackDecoder()                        # 通用解码器
+
+    while True:
+        # (RequestType, RequestData)
+        type_frame, *data_frames = input_socket.recv_multipart(copy=False)
+        request_type = EngineCoreRequestType(bytes(type_frame.buffer))
+
+        # Deserialize the request data.
+        decoder = add_request_decoder if (
+            request_type == EngineCoreRequestType.ADD) else generic_decoder
+        request = decoder.decode(data_frames)
+
+        # Push to input queue for core busy loop.
+        self.input_queue.put_nowait((request_type, request))
+```
+
+几个关键细节：
+
+1. **`recv_multipart(copy=False)`**：使用零拷贝接收，避免不必要的内存复制。消息帧直接引用 ZMQ 内部缓冲区
+2. **两种解码器**：`ADD` 类型请求有明确的类型约束（`EngineCoreRequest`），其他请求使用通用解码器
+3. **`put_nowait`**：非阻塞放入队列。由于 `queue.Queue` 默认无上限，这里不会阻塞
+
+**MsgpackDecoder 解码细节**
+
+`MsgpackDecoder` 是 vLLM 自定义的序列化工具（`vllm/v1/serial_utils.py` 第196-213行）：
+
+```python
+class MsgpackDecoder:
+    def __init__(self, t: Optional[Any] = None):
+        args = () if t is None else (t, )
+        self.decoder = msgpack.Decoder(*args,
+                                       ext_hook=self.ext_hook,
+                                       dec_hook=self.dec_hook)
+        self.aux_buffers: Sequence[bytestr] = ()
+
+    def decode(self, bufs: Union[bytestr, Sequence[bytestr]]) -> Any:
+        if isinstance(bufs, (bytes, bytearray, memoryview, zmq.Frame)):
+            return self.decoder.decode(bufs)
+
+        self.aux_buffers = bufs
+        try:
+            return self.decoder.decode(bufs[0])
+        finally:
+            self.aux_buffers = ()
+```
+
+当接收到多帧消息时，`bufs[0]` 是主消息体，`bufs[1:]` 是辅助缓冲区（例如大型张量的数据）。解码器可以通过索引从辅助缓冲区中零拷贝还原张量数据。
+
+**busy loop 消费 input_queue**
+
+EngineCore 的主循环从 input_queue 取出请求并处理（`vllm/v1/engine/core.py` 第512-548行）：
+
+```python
+def run_busy_loop(self):
+    """Core busy loop of the EngineCore."""
+    while True:
+        # 1) Poll the input queue until there is work to do.
+        self._process_input_queue()
+        # 2) Step the engine core and return the outputs.
+        self._process_engine_step()
+
+def _process_input_queue(self):
+    """Exits when an engine step needs to be performed."""
+    waited = False
+    while not self.engines_running and not (self.scheduler.has_requests()):
+        if logger.isEnabledFor(DEBUG) and self.input_queue.empty():
+            logger.debug("EngineCore waiting for work.")
+            waited = True
+        req = self.input_queue.get()          # 阻塞等待
+        self._handle_client_request(*req)
+
+    # Handle any more client requests.
+    while not self.input_queue.empty():
+        req = self.input_queue.get_nowait()   # 非阻塞取出剩余请求
+        self._handle_client_request(*req)
+```
+
+这段代码的设计很精妙：
+- 当没有任何请求时，`self.input_queue.get()` 会阻塞等待，不浪费 CPU
+- 一旦有了第一个请求，会继续非阻塞地取出所有排队的请求（批处理），然后进入执行步骤
+
+### 代码示例
+
+```python
+"""
+模拟 EngineCore 的 input socket 线程和 busy loop
+"""
+import queue
+import threading
+import time
+from enum import Enum
+
+class RequestType(Enum):
+    ADD = b"add"
+    ABORT = b"abort"
+
+class SimpleEngineCore:
+    def __init__(self):
+        self.input_queue = queue.Queue()
+        self.requests = {}
+        
+    def process_input_socket(self):
+        """模拟 input socket 线程"""
+        # 模拟接收请求
+        simulated_requests = [
+            (RequestType.ADD, {"id": "req_1", "prompt": "Hello"}),
+            (RequestType.ADD, {"id": "req_2", "prompt": "World"}),
+            (RequestType.ABORT, ["req_1"]),
+        ]
+        for req_type, data in simulated_requests:
+            time.sleep(0.1)  # 模拟网络延迟
+            self.input_queue.put_nowait((req_type, data))
+            print(f"[InputThread] 收到 {req_type.name}: {data}")
+    
+    def run_busy_loop(self):
+        """模拟 EngineCore busy loop"""
+        for _ in range(3):
+            # 阻塞等待第一条消息
+            req_type, data = self.input_queue.get(timeout=2.0)
+            self._handle_request(req_type, data)
+            
+            # 批量取出剩余消息
+            while not self.input_queue.empty():
+                req_type, data = self.input_queue.get_nowait()
+                self._handle_request(req_type, data)
+    
+    def _handle_request(self, req_type, data):
+        if req_type == RequestType.ADD:
+            self.requests[data["id"]] = data
+            print(f"[BusyLoop] 添加请求: {data['id']}")
+        elif req_type == RequestType.ABORT:
+            for rid in 
+                self.requests.pop(rid, None)
+                print(f"[BusyLoop] 中止请求: {rid}")
+
+engine = SimpleEngineCore()
+input_thread = threading.Thread(target=engine.process_input_socket, daemon=True)
+input_thread.start()
+engine.run_busy_loop()
+```
+
+---
+
+## 2.3 Engine 发送数据 -- EngineCore 的 output socket 线程
+
+### 原理讲解
+
+与 input socket 线程对称，EngineCore 还有一个 output socket 后台线程，负责：
+
+1. 从 `output_queue` 获取 `EngineCoreOutputs`
+2. 使用 `MsgpackEncoder` 将输出序列化
+3. 通过 ZMQ PUSH socket 发送给前端
+
+这个线程包含了多项性能优化技术：**buffer 复用**和**零拷贝发送**。
+
+### 源码解析
+
+**process_output_socket 方法** (`vllm/v1/engine/core.py` 第623-661行)：
+
+```python
+def process_output_socket(self, output_path: str, engine_index: int):
+    """Output socket IO thread."""
+
+    # Msgpack serialization encoding.
+    encoder = MsgpackEncoder()
+    # Send buffers to reuse.
+    reuse_buffers: list[bytearray] = []
+    # Keep references to outputs and buffers until zmq is finished
+    # with them (outputs may contain tensors/np arrays whose
+    # backing buffers were extracted for zero-copy send).
+    pending = deque[tuple[zmq.MessageTracker, Any, bytearray]]()
+
+    with zmq_socket_ctx(output_path, zmq.constants.PUSH,
+                        linger=4000) as socket:
+        while True:
+            outputs = self.output_queue.get()
+            if outputs == EngineCoreProc.ENGINE_CORE_DEAD:
+                socket.send(outputs, copy=False)
+                break
+            assert not isinstance(outputs, bytes)
+            outputs.engine_index = engine_index
+
+            # Reclaim buffers that zmq is finished with.
+            while pending and pending[-1][0].done:
+                reuse_buffers.append(pending.pop()[2])
+
+            buffer = reuse_buffers.pop() if reuse_buffers else bytearray()
+            buffers = encoder.encode_into(outputs, buffer)
+            tracker = socket.send_multipart(buffers,
+                                            copy=False,
+                                            track=True)
+            if not tracker.done:
+                ref = outputs if len(buffers) > 1 else None
+                pending.appendleft((tracker, ref, buffer))
+            elif len(reuse_buffers) < 2:
+                # Keep at most 2 buffers to reuse.
+                reuse_buffers.append(buffer)
+```
+
+**关键优化点解析：**
+
+**1. Buffer 复用机制**
+
+```python
+reuse_buffers: list[bytearray] = []
+# ...
+buffer = reuse_buffers.pop() if reuse_buffers else bytearray()
+buffers = encoder.encode_into(outputs, buffer)
+```
+
+`encoder.encode_into(outputs, buffer)` 将序列化数据写入已有的 `buffer`（`bytearray`），而不是每次都分配新的内存。这减少了频繁的内存分配和 GC 压力。
+
+**2. 零拷贝发送**
+
+```python
+tracker = socket.send_multipart(buffers, copy=False, track=True)
+```
+
+- `copy=False`：告诉 ZMQ 不要复制数据，直接引用原始缓冲区
+- `track=True`：返回 `MessageTracker`，用于追踪 ZMQ 何时完成发送（即何时可以安全回收缓冲区）
+
+**3. 引用保持与回收**
+
+```python
+if not tracker.done:
+    ref = outputs if len(buffers) > 1 else None
+    pending.appendleft((tracker, ref, buffer))
+```
+
+由于零拷贝发送，ZMQ 可能在后台异步发送数据。在发送完成之前，必须保持对数据的引用，否则 Python GC 可能回收底层内存。`pending` 双端队列保存了 `(tracker, 原始对象引用, buffer)` 三元组，直到 ZMQ 确认发送完成才释放。
+
+**MsgpackEncoder 的 encode_into 方法** (`vllm/v1/serial_utils.py` 第82-89行)：
+
+```python
+def encode_into(self, obj: Any, buf: bytearray) -> Sequence[bytestr]:
+    try:
+        self.aux_buffers = [buf]
+        bufs = self.aux_buffers
+        self.encoder.encode_into(obj, buf)
+        return bufs
+    finally:
+        self.aux_buffers = None
+```
+
+`aux_buffers` 列表中除了主缓冲区 `buf`，还可能包含大型张量的直接内存引用（见 `_encode_tensor` 方法中对大于 `size_threshold` 的数据的处理）。
+
+### 数据流图
+
+```
+  EngineCore output socket 线程的 buffer 生命周期
+  ================================================================
+
+  step 1: busy loop 产生输出
+  
+    output_queue.put(EngineCoreOutputs)
+         |
+         v
+  step 2: output thread 获取输出
+  
+    outputs = output_queue.get()
+         |
+         v
+  step 3: 从复用池取 buffer（或新建）
+  
+    reuse_buffers: [buf_A, buf_B]  -->  pop()  -->  buffer = buf_B
+         |
+         v
+  step 4: 序列化到 buffer
+  
+    encoder.encode_into(outputs, buffer)
+    返回: [buffer(主数据), tensor_view_1, tensor_view_2, ...]
+         |
+         v
+  step 5: 零拷贝发送
+  
+    tracker = socket.send_multipart(buffers, copy=False, track=True)
+         |
+         v
+  step 6: 追踪发送状态
+  
+    pending: [(tracker, outputs_ref, buffer), ...]
+                  |
+                  | tracker.done == True 时
+                  v
+    reuse_buffers.append(buffer)  // 回收到复用池
+```
+
+---
+
+## 2.4 AsyncLLM 发送请求
+
+### 原理讲解
+
+AsyncLLM 是 vLLM 的异步前端接口。当用户调用 `generate()` 时，请求经过以下流程：
+
+1. `Processor` 将用户输入转换为 `EngineCoreRequest`
+2. `OutputProcessor` 注册请求状态和输出队列
+3. `EngineCoreClient`（通常是 `AsyncMPClient`）通过 ZMQ 将请求发送到 EngineCore 后台进程
+
+### 源码解析
+
+**AsyncLLM.generate 方法** (`vllm/v1/engine/async_llm.py` 第268-348行)：
+
+```python
+async def generate(
+    self,
+    prompt: PromptType,
+    sampling_params: SamplingParams,
+    request_id: str,
+    ...
+) -> AsyncGenerator[RequestOutput, None]:
+    try:
+        self._run_output_handler()   # 确保 output_handler 已启动
+
+        q = await self.add_request(   # 添加请求
+            request_id, prompt, sampling_params, ...
+        )
+
+        # 从 per-request queue 中迭代取出输出
+        finished = False
+        while not finished:
+            out = q.get_nowait() or await q.get()
+            finished = out.finished
+            yield out
+
+    except asyncio.CancelledError:
+        await self.abort(request_id)
+        raise
+```
+
+**AsyncLLM._add_request 方法** (`vllm/v1/engine/async_llm.py` 第248-258行)：
+
+```python
+async def _add_request(self, request: EngineCoreRequest,
+                       prompt: Optional[str],
+                       parent_req: Optional[ParentRequest], index: int,
+                       queue: RequestOutputCollector):
+
+    # 1) 在前端 OutputProcessor 中注册请求
+    self.output_processor.add_request(request, prompt, parent_req, index,
+                                      queue)
+
+    # 2) 通过 ZMQ 发送 EngineCoreRequest 到后台 EngineCore
+    await self.engine_core.add_request_async(request)
+```
+
+**AsyncMPClient._send_input 方法** (`vllm/v1/engine/core_client.py` 第809-843行)：
+
+```python
+def _send_input(self,
+                request_type: EngineCoreRequestType,
+                request: Any,
+                engine: Optional[CoreEngine] = None) -> Awaitable[Any]:
+    self.ensure_alive()
+    if engine is None:
+        engine = self.core_engine
+
+    message = (request_type.value, *self.encoder.encode(request))
+    return self._send_input_message(message, engine, request)
+
+def _send_input_message(self, message: tuple[bytestr, ...],
+                        engine: CoreEngine, objects: Any) -> Awaitable[Any]:
+    self.ensure_alive()
+    self.free_pending_messages()
+
+    msg = (engine.identity, ) + message
+    if not objects or len(msg) <= 3:
+        # 没有辅助缓冲区 -> 请求中没有张量
+        return self.input_socket.send_multipart(msg, copy=False)
+
+    # 有辅助缓冲区，需要追踪
+    future = self.input_socket.send_multipart(msg, copy=False, track=True)
+
+    def add_pending(f):
+        with contextlib.suppress(BaseException):
+            self.add_pending_message(f.result(), objects)
+
+    future.add_done_callback(add_pending)
+    return future
+```
+
+**消息的完整格式：**
+
+```
+发送到 ROUTER socket 的消息帧结构：
++----------+------------------+------------------+------------------+
+| identity | request_type     | encoded_data     | aux_buffer_1 ... |
+| (2 bytes)| (enum value)     | (msgpack 主体)   | (张量数据等)      |
++----------+------------------+------------------+------------------+
+  帧 0        帧 1               帧 2               帧 3+
+```
+
+**序列化流程** (`vllm/v1/serial_utils.py` 第70-78行)：
+
+```python
+def encode(self, obj: Any) -> Sequence[bytestr]:
+    try:
+        self.aux_buffers = bufs = [b'']
+        bufs[0] = self.encoder.encode(obj)
+        return bufs
+    finally:
+        self.aux_buffers = None
+```
+
+`MsgpackEncoder.encode()` 返回一个 `Sequence[bytestr]`，其中 `bufs[0]` 是 msgpack 编码的主数据体，`bufs[1:]` 是大型张量/数组的直接内存视图（避免复制到主体中）。
+
+### 代码示例
+
+```python
+"""
+模拟 AsyncLLM 发送请求的简化流程
+"""
+import asyncio
+from dataclasses import dataclass
+from typing import Optional
+
+@dataclass
+class SimpleRequest:
+    request_id: str
+    prompt: str
+    
+@dataclass
+class SimpleOutput:
+    request_id: str
+    text: str
+    finished: bool
+
+class SimpleOutputCollector:
+    """模拟 RequestOutputCollector"""
+    
+    def __init__(self):
+        self._queue = asyncio.Queue()
+    
+    def put(self, output):
+        self._queue.put_nowait(output)
+    
+    async def get(self):
+        return await self._queue.get()
+    
+    def get_nowait(self):
+        try:
+            return self._queue.get_nowait()
+        except asyncio.QueueEmpty:
+            return None
+
+class SimpleAsyncLLM:
+    """模拟 AsyncLLM 的请求发送流程"""
+    
+    def __init__(self):
+        self.request_states = {}
+    
+    async def generate(self, prompt: str, request_id: str):
+        # 1) 创建 per-request queue
+        collector = SimpleOutputCollector()
+        
+        # 2) 注册请求
+        request = SimpleRequest(request_id=request_id, prompt=prompt)
+        self.request_states[request_id] = collector
+        
+        # 3) "发送" 到 EngineCore（这里模拟）
+        print(f"[AsyncLLM] 发送请求 {request_id} -> EngineCore")
+        
+        # 模拟 EngineCore 返回结果
+        asyncio.get_event_loop().call_later(
+            0.1, collector.put, SimpleOutput(request_id, "Hello", False))
+        asyncio.get_event_loop().call_later(
+            0.2, collector.put, SimpleOutput(request_id, "Hello World!", True))
+        
+        # 4) 迭代获取输出
+        finished = False
+        while not finished:
+            out = collector.get_nowait() or await collector.get()
+            finished = out.finished
+            yield out
+
+async def main():
+    llm = SimpleAsyncLLM()
+    async for output in llm.generate("Say hello", "req_001"):
+        print(f"[Output] {output.text} (finished={output.finished})")
+
+asyncio.run(main())
+```
+
+---
+
+## 2.5 AsyncLLM 接收结果 -- output_handler 和 OutputProcessor
+
+### 原理讲解
+
+AsyncLLM 的结果接收由两个关键组件协作完成：
+
+1. **output_handler**：一个 asyncio Task，持续从 EngineCore 拉取 `EngineCoreOutputs`
+2. **OutputProcessor**：将 `EngineCoreOutputs` 转换为 `RequestOutput`，并分发到每个请求的 `RequestOutputCollector`
+
+```
+EngineCore (PUSH)
+     |
+     | ZMQ PULL
+     v
+process_outputs_socket (asyncio task)
+     |
+     | outputs_queue.put()
+     v
+output_handler (asyncio task)
+     |
+     | engine_core.get_output_async()
+     v
+OutputProcessor.process_outputs()
+     |
+     | req_state.queue.put(request_output)
+     v
+per-request RequestOutputCollector
+     |
+     | generate() yields
+     v
+API Server / 用户代码
+```
+
+### 源码解析
+
+**process_outputs_socket (AsyncMPClient)** (`vllm/v1/engine/core_client.py` 第771-796行)：
+
+```python
+async def process_outputs_socket():
+    try:
+        while True:
+            frames = await output_socket.recv_multipart(copy=False)
+            resources.validate_alive(frames)
+            outputs: EngineCoreOutputs = decoder.decode(frames)
+            if outputs.utility_output:
+                _process_utility_output(outputs.utility_output,
+                                        utility_results)
+                continue
+
+            if output_handler is not None:
+                assert _self_ref is not None
+                _self = _self_ref()
+                if not _self:
+                    return
+                await output_handler(_self, outputs)
+
+            if outputs.outputs or outputs.scheduler_stats:
+                outputs_queue.put_nowait(outputs)
+    except Exception as e:
+        outputs_queue.put_nowait(e)
+```
+
+这个函数运行在一个独立的 asyncio Task 中，不断从 output socket 接收数据。关键点：
+- `validate_alive` 检查是否收到 `ENGINE_CORE_DEAD` 标志
+- Utility 输出（如 `profile`、`reset_cache` 等操作的返回值）直接路由到对应的 `Future`
+- 正常输出放入 `outputs_queue`
+
+**output_handler (AsyncLLM)** (`vllm/v1/engine/async_llm.py` 第362-411行)：
+
+```python
+async def output_handler():
+    try:
+        while True:
+            # 1) Pull EngineCoreOutputs from the EngineCore.
+            outputs = await engine_core.get_output_async()
+            num_outputs = len(outputs.outputs)
+
+            iteration_stats = IterationStats() if (
+                log_stats and num_outputs) else None
+
+            # Split outputs into chunks to avoid blocking event loop
+            if num_outputs <= VLLM_V1_OUTPUT_PROC_CHUNK_SIZE:
+                slices = (outputs.outputs, )
+            else:
+                slices = np.array_split(
+                    outputs.outputs,
+                    cdiv(num_outputs, VLLM_V1_OUTPUT_PROC_CHUNK_SIZE))
+
+            for i, outputs_slice in enumerate(slices):
+                # 2) Process EngineCoreOutputs.
+                processed_outputs = output_processor.process_outputs(
+                    outputs_slice, outputs.timestamp, iteration_stats)
+                assert not processed_outputs.request_outputs
+
+                # Allow other asyncio tasks to run between chunks
+                if i + 1 < len(slices):
+                    await asyncio.sleep(0)
+
+                # 3) Abort any reqs that finished due to stop strings.
+                await engine_core.abort_requests_async(
+                    processed_outputs.reqs_to_abort)
+
+            # 4) Logging.
+            if stat_loggers:
+                AsyncLLM._record_stats(
+                    stat_loggers[outputs.engine_index],
+                    scheduler_stats=outputs.scheduler_stats,
+                    iteration_stats=iteration_stats,
+                )
+    except Exception as e:
+        logger.exception("AsyncLLM output_handler failed.")
+        output_processor.propagate_error(e)
+```
+
+**分块处理的设计**：当一个 batch 中有大量输出时，output_handler 会将其分成多个 chunk 处理，每个 chunk 之间通过 `await asyncio.sleep(0)` 让出事件循环控制权，防止阻塞其他 asyncio 任务（如正在等待结果的 `generate()` 协程）。
+
+**OutputProcessor.process_outputs** (`vllm/v1/engine/output_processor.py` 第300-391行)：
+
+```python
+def process_outputs(
+    self,
+    engine_core_outputs: list[EngineCoreOutput],
+    engine_core_timestamp: Optional[float] = None,
+    iteration_stats: Optional[IterationStats] = None,
+) -> OutputProcessorOutput:
+    request_outputs: list[RequestOutput] = []
+    reqs_to_abort: list[str] = []
+    
+    for engine_core_output in engine_core_outputs:
+        req_id = engine_core_output.request_id
+        req_state = self.request_states.get(req_id)
+        if req_state is None:
+            continue  # 忽略已中止的请求
+
+        # 1) 更新统计信息
+        self._update_stats_from_output(req_state, engine_core_output,
+                                       engine_core_timestamp, iteration_stats)
+
+        # 2) 反 tokenize
+        stop_string = req_state.detokenizer.update(
+            new_token_ids, finish_reason == FinishReason.STOP)
+
+        # 3) 计算 logprobs
+        req_state.logprobs_processor.update_from_output(engine_core_output)
+
+        # 4) 创建 RequestOutput 并分发
+        if request_output := req_state.make_request_output(...):
+            if req_state.queue is not None:
+                # AsyncLLM 模式：直接放入 per-request queue
+                req_state.queue.put(request_output)
+            else:
+                # LLMEngine 模式：收集到列表返回
+                request_outputs.append(request_output)
+
+        # 清理已完成的请求
+        if finish_reason is not None:
+            self.request_states.pop(req_id)
+```
+
+**RequestOutputCollector** (`vllm/v1/engine/output_processor.py` 第20-62行) 是连接 output_handler 和 generate() 协程的桥梁：
+
+```python
+class RequestOutputCollector:
+    def __init__(self, output_kind: RequestOutputKind):
+        self.aggregate = output_kind == RequestOutputKind.DELTA
+        self.output: Optional[Union[RequestOutput, Exception]] = None
+        self.ready = asyncio.Event()
+
+    def put(self, output: Union[RequestOutput, Exception]) -> None:
+        """Non-blocking put operation."""
+        if self.output is None or isinstance(output, Exception):
+            self.output = output
+            self.ready.set()
+        elif isinstance(self.output, RequestOutput):
+            # 合并输出（当生产者快于消费者时）
+            self.output.add(output, aggregate=self.aggregate)
+
+    async def get(self) -> RequestOutput:
+        """Get operation blocks on put event."""
+        while (output := self.output) is None:
+            await self.ready.wait()
+        self.output = None
+        self.ready.clear()
+        if isinstance(output, Exception):
+            raise output
+        return output
+```
+
+注意 `RequestOutputCollector` 并不是标准队列 -- 它只保存最新的一个输出。当生产者（output_handler）比消费者（generate() 协程）更快时，多个输出会被**合并**（`self.output.add(output, aggregate=self.aggregate)`）。这是一个重要的性能优化：在高吞吐场景下，避免了队列无限增长的问题。
+
+### 完整数据流程图
+
+```
+                     完整请求-响应数据流
+  ====================================================================
+
+  用户代码
+    |
+    | async for output in llm.generate(prompt, params, request_id):
+    v
+  AsyncLLM.generate()
+    |
+    | 1. processor.process_inputs() -> EngineCoreRequest
+    | 2. output_processor.add_request() -> 注册 RequestState + queue
+    | 3. engine_core.add_request_async() -> ZMQ 发送
+    v
+  AsyncMPClient._send_input()
+    |
+    | encoder.encode(request) -> [msgpack_body, tensor_buf_1, ...]
+    | input_socket.send_multipart([identity, type, body, bufs...])
+    v
+  ~~~~~~~~~~~~~~~~~ ZMQ IPC (DEALER/ROUTER) ~~~~~~~~~~~~~~~~~
+    |
+    v
+  EngineCoreProc.process_input_socket() [后台线程]
+    |
+    | decoder.decode(frames) -> EngineCoreRequest
+    | input_queue.put_nowait((ADD, request))
+    v
+  EngineCoreProc.run_busy_loop() [主线程]
+    |
+    | _process_input_queue() -> add_request()
+    | scheduler.schedule() -> SchedulerOutput
+    | executor.execute_model() -> ModelRunnerOutput
+    | scheduler.update_from_output() -> EngineCoreOutputs
+    | output_queue.put_nowait(outputs)
+    v
+  EngineCoreProc.process_output_socket() [后台线程]
+    |
+    | encoder.encode_into(outputs, buffer)
+    | socket.send_multipart(buffers, copy=False, track=True)
+    v
+  ~~~~~~~~~~~~~~~~~ ZMQ IPC (PUSH/PULL) ~~~~~~~~~~~~~~~~~
+    |
+    v
+  AsyncMPClient.process_outputs_socket() [asyncio Task]
+    |
+    | decoder.decode(frames) -> EngineCoreOutputs
+    | outputs_queue.put_nowait(outputs)
+    v
+  AsyncLLM.output_handler() [asyncio Task]
+    |
+    | output_processor.process_outputs()
+    |   -> detokenize
+    |   -> compute logprobs
+    |   -> make_request_output()
+    |   -> req_state.queue.put(request_output)  # per-request
+    v
+  RequestOutputCollector
+    |
+    | generate() 中: out = q.get_nowait() or await q.get()
+    v
+  yield RequestOutput -> 用户代码
+```
+
+### 代码示例
+
+```python
+"""
+完整模拟 vLLM 的请求-响应流水线
+包含: 前端发送 -> EngineCore 处理 -> 前端接收分发
+"""
+import asyncio
+import time
+from dataclasses import dataclass, field
+from typing import Optional, AsyncGenerator
+
+@dataclass
+class MockEngineCoreOutput:
+    request_id: str
+    new_token_ids: list[int]
+    finished: bool
+
+@dataclass 
+class MockEngineCoreOutputs:
+    outputs: list[MockEngineCoreOutput]
+    timestamp: float = field(default_factory=time.time)
+
+@dataclass
+class MockRequestOutput:
+    request_id: str
+    text: str
+    finished: bool
+
+class MockOutputCollector:
+    """简化版 RequestOutputCollector"""
+    def __init__(self):
+        self.output: Optional[MockRequestOutput] = None
+        self.ready = asyncio.Event()
+    
+    def put(self, output):
+        if self.output is None:
+            self.output = output
+            self.ready.set()
+        else:
+            # 合并: 替换为最新输出
+            self.output = output
+    
+    async def get(self):
+        while self.output is None:
+            await self.ready.wait()
+        out = self.output
+        self.output = None
+        self.ready.clear()
+        return out
+    
+    def get_nowait(self):
+        out = self.output
+        if out is not None:
+            self.output = None
+            self.ready.clear()
+        return out
+
+class MockEngineCore:
+    """模拟后台 EngineCore 进程"""
+    
+    def __init__(self):
+        self._output_queue = asyncio.Queue()
+        self._requests = {}
+    
+    def add_request(self, request_id: str, prompt: str):
+        self._requests[request_id] = {
+            "prompt": prompt, "tokens_generated": 0
+        }
+        # 模拟异步推理
+        asyncio.get_event_loop().call_later(0.05, self._step)
+    
+    def _step(self):
+        outputs = []
+        for req_id, state in list(self._requests.items()):
+            state["tokens_generated"] += 1
+            finished = state["tokens_generated"] >= 3
+            outputs.append(MockEngineCoreOutput(
+                request_id=req_id,
+                new_token_ids=[100 + state["tokens_generated"]],
+                finished=finished
+            ))
+            if finished:
+                del self._requests[req_id]
+        
+        if outputs:
+            self._output_queue.put_nowait(
+                MockEngineCoreOutputs(outputs=outputs))
+        
+        if self._requests:
+            asyncio.get_event_loop().call_later(0.05, self._step)
+    
+    async def get_output(self):
+        return await self._output_queue.get()
+
+class MockAsyncLLM:
+    """模拟 AsyncLLM 的完整流程"""
+    
+    def __init__(self):
+        self.engine_core = MockEngineCore()
+        self.request_states: dict[str, MockOutputCollector] = {}
+        self._handler_started = False
+        # 模拟 token -> text 映射
+        self.vocab = {101: "Hello", 102: " World", 103: "!"}
+    
+    def _start_output_handler(self):
+        if self._handler_started:
+            return
+        self._handler_started = True
+        asyncio.create_task(self._output_handler())
+    
+    async def _output_handler(self):
+        """模拟 output_handler -- 拉取输出并分发"""
+        while True:
+            outputs = await self.engine_core.get_output()
+            
+            for output in outputs.outputs:
+                collector = self.request_states.get(output.request_id)
+                if collector is None:
+                    continue
+                
+                # 模拟 detokenize
+                text = self.vocab.get(output.new_token_ids[0], "?")
+                
+                request_output = MockRequestOutput(
+                    request_id=output.request_id,
+                    text=text,
+                    finished=output.finished
+                )
+                collector.put(request_output)
+                
+                if output.finished:
+                    del self.request_states[output.request_id]
+    
+    async def generate(self, prompt: str, 
+                       request_id: str) -> AsyncGenerator[MockRequestOutput, None]:
+        self._start_output_handler()
+        
+        # 注册 per-request collector
+        collector = MockOutputCollector()
+        self.request_states[request_id] = collector
+        
+        # 发送请求到 EngineCore
+        self.engine_core.add_request(request_id, prompt)
+        
+        # 迭代获取输出
+        finished = False
+        while not finished:
+            out = collector.get_nowait() or await collector.get()
+            finished = out.finished
+            yield out
+
+async def main():
+    llm = MockAsyncLLM()
+    
+    print("=== 流式生成 ===")
+    async for output in llm.generate("Say hello", "req_001"):
+        status = "DONE" if output.finished else "STREAMING"
+        print(f"  [{status}] token: {output.text}")
+
+asyncio.run(main())
+```
+
+---
+
+## 总结
+
+本章深入分析了 vLLM V1 引擎模块的通信架构和流式执行机制：
+
+1. **ZMQ 通信模式选择**：vLLM 使用 DEALER/ROUTER 模式处理前端到 EngineCore 的双向通信（支持多引擎标识路由），使用 PUSH/PULL 模式进行 EngineCore 到前端的单向输出传输
+
+2. **EngineCore input socket 线程**：后台线程通过零拷贝接收 ZMQ 消息，使用 MsgpackDecoder 反序列化后放入 input_queue，与 busy loop 解耦
+
+3. **EngineCore output socket 线程**：实现了 buffer 复用（避免频繁内存分配）、零拷贝发送（`copy=False`）、和 MessageTracker 追踪（确保引用安全）三重优化
+
+4. **AsyncLLM 请求发送**：通过 Processor 预处理输入，MsgpackEncoder 序列化（支持大张量的辅助缓冲区机制），最终通过 ROUTER socket 路由到目标 EngineCore
+
+5. **AsyncLLM 结果接收**：output_handler 异步拉取输出，OutputProcessor 执行 detokenize 和 logprobs 计算，然后通过 RequestOutputCollector（支持输出合并）分发给每个请求的 generate() 协程
+
+6. **性能设计哲学**：整个通信管道的核心设计目标是将 IO 操作与 GPU 计算重叠。ZMQ 操作释放 GIL，后台线程可以与 Python 主线程并行；asyncio Task 分工明确，避免了不必要的阻塞
+
+---
+
+## 思考题
+
+1. **为什么 vLLM 选择 DEALER/ROUTER 而不是 REQ/REP 模式来实现 input socket？** 如果使用 REQ/REP，会在哪些场景下出现问题？
+
+2. **在 `process_output_socket` 中，`pending` 双端队列为什么要保持对 `outputs` 对象的引用（`ref = outputs if len(buffers) > 1 else None`）？** 如果不保持引用会发生什么？什么情况下 `len(buffers) > 1`？
+
+3. **`RequestOutputCollector` 使用 `asyncio.Event` 而非 `asyncio.Queue`。它在 `put()` 时会合并输出而不是排队。** 这种设计在什么场景下可能导致信息丢失？vLLM 是如何避免这个问题的？（提示：考虑 `output_kind` 的不同取值）
+
+4. **在 output_handler 中，大批量输出被分成 chunk 处理，每个 chunk 之间有 `await asyncio.sleep(0)`。** 如果去掉这个 sleep(0)，会对系统产生什么影响？请结合 asyncio 事件循环的调度机制说明。
+
+5. **设计题**：假设你需要在 vLLM 中添加一种新的请求类型（如 "PAUSE_REQUEST"，暂停某个请求的生成），请描述需要修改的组件和数据流路径。至少涉及 `EngineCoreRequestType`、`process_input_socket`、`_handle_client_request` 和前端发送方法。
